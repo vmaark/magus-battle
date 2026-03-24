@@ -1,0 +1,5 @@
+packages:
+  - 'magus-battle-simulator'
+  - 'magus-battle-cli'
+  - 'magus-battle-webapp'
+  - 'magus-km'

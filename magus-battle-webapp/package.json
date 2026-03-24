@@ -1,0 +1,25 @@
+{
+  "name": "magus-battle-webapp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M.A.G.U.S. harci szimulátor webalkalmazás",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "magus-battle-simulator": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.5.2",
+    "vite": "^5.4.10"
+  }
+}

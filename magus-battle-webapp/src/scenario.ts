@@ -1,0 +1,185 @@
+import type { Combatant, EncounterOptions, TargetingStrategy } from 'magus-battle-simulator'
+
+export type Scenario = {
+  partyA: Combatant[]
+  partyB: Combatant[]
+  settings?: {
+    targeting?: string
+    maxRounds?: number
+    mandatoryEpFromFp?: boolean
+  }
+}
+
+const TARGETING_MAP: Record<string, TargetingStrategy> = {
+  random: 'random',
+  weakest: 'weakest',
+  strongest: 'strongest',
+  leggyengebb: 'weakest',
+  legerosebb: 'strongest',
+}
+
+export type ParsedScenario = {
+  partyA: Combatant[]
+  partyB: Combatant[]
+  options: EncounterOptions
+  maxRounds: number
+}
+
+export const parseScenario = (raw: unknown): ParsedScenario => {
+  const s = raw as Scenario
+
+  if (!s.partyA || !Array.isArray(s.partyA) || s.partyA.length === 0) {
+    throw new Error('A "partyA" mező kötelező és legalább 1 harcost kell tartalmazzon.')
+  }
+  if (!s.partyB || !Array.isArray(s.partyB) || s.partyB.length === 0) {
+    throw new Error('A "partyB" mező kötelező és legalább 1 harcost kell tartalmazzon.')
+  }
+
+  const targeting: TargetingStrategy = TARGETING_MAP[s.settings?.targeting ?? 'random'] ?? 'random'
+
+  return {
+    partyA: s.partyA,
+    partyB: s.partyB,
+    options: {
+      targeting,
+      optionalRules: {
+        mandatoryEpFromFp: s.settings?.mandatoryEpFromFp ?? true,
+      },
+    },
+    maxRounds: s.settings?.maxRounds ?? 100,
+  }
+}
+
+export const DEFAULT_SCENARIO = `{
+  "partyA": [
+    {
+      "id": "kardos-peter",
+      "name": "Kardos Péter",
+      "ke": 15,
+      "te": 40,
+      "ve": 85,
+      "ce": 20,
+      "maxEp": 10,
+      "ep": 10,
+      "maxFp": 35,
+      "fp": 35,
+      "weapon": {
+        "name": "Hosszu kard",
+        "category": 3,
+        "ke": 5,
+        "te": 10,
+        "ve": 10,
+        "ce": 0,
+        "damage": "2k6"
+      },
+      "armor": { "name": "Láncing", "sfe": 4 },
+      "isPlayerCharacter": true,
+      "status": "active"
+    },
+    {
+      "id": "ijasz-anna",
+      "name": "Íjász Anna",
+      "ke": 12,
+      "te": 30,
+      "ve": 70,
+      "ce": 45,
+      "maxEp": 8,
+      "ep": 8,
+      "maxFp": 28,
+      "fp": 28,
+      "weapon": {
+        "name": "Hosszu ij",
+        "category": 2,
+        "ke": 4,
+        "te": 0,
+        "ve": 0,
+        "ce": 4,
+        "damage": "2k6+1"
+      },
+      "armor": { "name": "Bőrvért", "sfe": 2 },
+      "isPlayerCharacter": true,
+      "status": "active"
+    }
+  ],
+  "partyB": [
+    {
+      "id": "ork-zsoldos-1",
+      "name": "Ork Zsoldos",
+      "ke": 8,
+      "te": 35,
+      "ve": 75,
+      "ce": 10,
+      "maxEp": 12,
+      "ep": 12,
+      "maxFp": 40,
+      "fp": 40,
+      "weapon": {
+        "name": "Furkosbot",
+        "category": 4,
+        "ke": 5,
+        "te": 10,
+        "ve": 10,
+        "ce": 0,
+        "damage": "1k10"
+      },
+      "armor": { "name": "Fémpikkelyes", "sfe": 5 },
+      "isPlayerCharacter": false,
+      "status": "active"
+    },
+    {
+      "id": "ork-harcos-2",
+      "name": "Ork Harcos",
+      "ke": 6,
+      "te": 28,
+      "ve": 68,
+      "ce": 8,
+      "maxEp": 10,
+      "ep": 7,
+      "maxFp": 32,
+      "fp": 20,
+      "weapon": {
+        "name": "Egykezes csatabard",
+        "category": 4,
+        "ke": 3,
+        "te": 10,
+        "ve": 5,
+        "ce": 0,
+        "damage": "2k6+1"
+      },
+      "armor": { "name": "Bőrvért", "sfe": 2 },
+      "isPlayerCharacter": false,
+      "status": "active",
+      "targetId": "kardos-peter"
+    },
+    {
+      "id": "ork-ij-3",
+      "name": "Ork Íjász",
+      "ke": 5,
+      "te": 20,
+      "ve": 55,
+      "ce": 30,
+      "maxEp": 8,
+      "ep": 8,
+      "maxFp": 25,
+      "fp": 25,
+      "weapon": {
+        "name": "Rovid ij",
+        "category": 2,
+        "ke": 5,
+        "te": 0,
+        "ve": 0,
+        "ce": 5,
+        "damage": "1k6"
+      },
+      "armor": { "name": "Nincs", "sfe": 0 },
+      "isPlayerCharacter": false,
+      "status": "active"
+    }
+  ],
+  "settings": {
+    "targeting": "random",
+    "maxRounds": 50,
+    "mandatoryEpFromFp": true
+  }
+}
+`

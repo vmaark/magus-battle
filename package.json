@@ -1,0 +1,8 @@
+{
+  "name": "magus",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
