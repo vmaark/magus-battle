@@ -3,12 +3,16 @@ import { createEncounter, MAGUS_EQUIPMENT_DATA } from 'magus-battle-simulator'
 import type {
   AppliedRule,
   AttackEvent,
+  AttackMode,
   CombatEvent,
   ArmorRecord,
   Combatant,
   CombatantSnapshot,
+  DistanceKey,
+  DistanceMap,
   EncounterResult,
   InitiativeEntry,
+  Party,
   RoundResult,
   WeaponRecord,
 } from 'magus-battle-simulator'
@@ -18,15 +22,16 @@ import type { Scenario } from './scenario'
 type RunState = {
   initialA: CombatantSnapshot[]
   initialB: CombatantSnapshot[]
-  initialDistances: Record<string, number>
-  roundDistances: Record<number, Record<string, number>>
+  initialDistances: DistanceMap
+  roundDistances: Record<number, DistanceMap>
   result: EncounterResult
 }
 
-const distanceKey = (attackerId: string, defenderId: string): string => `${attackerId}->${defenderId}`
+const distanceKey = (attackerId: string, defenderId: string): DistanceKey =>
+  `${attackerId}->${defenderId}`
 
 const getPairDistance = (
-  distances: Record<string, number> | undefined,
+  distances: DistanceMap | undefined,
   attackerId: string,
   defenderId: string,
 ): number | null => {
@@ -39,7 +44,7 @@ const getPairDistance = (
 }
 
 const setPairDistance = (
-  distances: Record<string, number>,
+  distances: DistanceMap,
   attackerId: string,
   defenderId: string,
   value: number,
@@ -50,11 +55,11 @@ const setPairDistance = (
 }
 
 const buildRoundDistances = (
-  initialDistances: Record<string, number>,
+  initialDistances: DistanceMap,
   rounds: RoundResult[],
-): Record<number, Record<string, number>> => {
+): Record<number, DistanceMap> => {
   const current = { ...initialDistances }
-  const byRound: Record<number, Record<string, number>> = {}
+  const byRound: Record<number, DistanceMap> = {}
   for (const round of rounds) {
     for (const event of round.events) {
       if (
@@ -76,14 +81,14 @@ const isRangedCombatant = (c: CombatantSnapshot): boolean =>
 
 const roundDistancePairs = (
   combatants: CombatantSnapshot[],
-  distances: Record<string, number> | undefined,
+  distances: DistanceMap | undefined,
 ): Array<{ left: CombatantSnapshot; right: CombatantSnapshot; distanceFeet: number }> => {
   if (!distances) return []
   const byId = new Map(combatants.map((c) => [c.id, c]))
   const seen = new Set<string>()
   const pairs: Array<{ left: CombatantSnapshot; right: CombatantSnapshot; distanceFeet: number }> = []
 
-  for (const [key, rawDistance] of Object.entries(distances)) {
+  for (const [key, rawDistance] of Object.entries(distances) as Array<[DistanceKey, number]>) {
     const [leftId, rightId] = key.split('->')
     if (!leftId || !rightId) continue
     const left = byId.get(leftId)
@@ -130,7 +135,7 @@ const armorPresetNames = MAGUS_EQUIPMENT_DATA.armors
   .map((armor) => armor.name)
   .sort((a, b) => a.localeCompare(b, 'hu'))
 
-const toAttackMode = (weapon: WeaponRecord): 'melee' | 'ranged' =>
+const toAttackMode = (weapon: WeaponRecord): AttackMode =>
   weapon.kind === 'kozelharci' ? 'melee' : 'ranged'
 
 const formatRules = (rules: AppliedRule[]): string =>
@@ -154,7 +159,7 @@ const statusLabel = (status: CombatantSnapshot['status']): string => {
   }
 }
 
-const partyName = (party: 'a' | 'b'): string => (party === 'a' ? 'A' : 'B')
+const partyName = (party: Party): string => (party === 'a' ? 'A' : 'B')
 
 const HealthBar = ({ current, max, label }: { current: number; max: number; label: string }) => {
   const clamped = Math.max(0, current)
@@ -290,7 +295,7 @@ const PartyTable = ({
   title: string
   party: CombatantSnapshot[]
   allCombatants: CombatantSnapshot[]
-  distances?: Record<string, number>
+  distances?: DistanceMap
 }) => (
   <div className="panel">
     <h3>{title}</h3>
@@ -377,9 +382,9 @@ const splitByParty = (stateAfter: CombatantSnapshot[]): { a: CombatantSnapshot[]
   a: stateAfter.filter((s) => s.party === 'a'),
   b: stateAfter.filter((s) => s.party === 'b'),
 })
-type TeamSide = 'a' | 'b'
+type TeamSide = Party
 
-const createEmptyCombatant = (partyPrefix: 'a' | 'b', idx: number): Combatant => ({
+const createEmptyCombatant = (partyPrefix: Party, idx: number): Combatant => ({
   id: `${partyPrefix}-${Date.now()}-${idx}`,
   name: `Új harcos ${idx + 1}`,
   ke: 10,
@@ -682,7 +687,7 @@ const FighterEditor = ({
               onChange={(e) =>
                 onUpdate(team, idx, (p) => ({
                   ...p,
-                  weapon: { ...p.weapon, attackMode: e.target.value as 'melee' | 'ranged' },
+                  weapon: { ...p.weapon, attackMode: e.target.value as AttackMode },
                 }))
               }
             >
