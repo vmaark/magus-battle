@@ -4,6 +4,7 @@
  */
 
 import type {
+  AttackMode,
   Combatant,
   RoundResult,
   InitiativeEntry,
@@ -15,6 +16,10 @@ import type {
   CombatantSnapshot,
   CombatRuleHooks,
   AppliedRule,
+  DistanceKey,
+  DistanceMap,
+  InjuryPenaltyCode,
+  Party,
 } from './types'
 import { SEGMENT_COST, ROUND_SEGMENTS } from './types'
 import { deriveStatus, resolveAttack } from './combat'
@@ -44,7 +49,8 @@ type RangedRoundSettings = {
   meleeReachFeet: number
 }
 
-const distanceKey = (attackerId: string, defenderId: string): string => `${attackerId}->${defenderId}`
+const distanceKey = (attackerId: string, defenderId: string): DistanceKey =>
+  `${attackerId}->${defenderId}`
 
 const isRangedWeapon = (weapon: Combatant['weapon']): boolean =>
   weapon.attackMode === 'ranged' || weapon.ce > 0
@@ -55,7 +61,7 @@ const getWeaponRange = (weapon: Combatant['weapon']): number | null => {
 }
 
 const getPairDistance = (
-  distances: Record<string, number>,
+  distances: DistanceMap,
   aId: string,
   bId: string,
 ): number | null => {
@@ -67,7 +73,7 @@ const getPairDistance = (
 }
 
 const setPairDistance = (
-  distances: Record<string, number>,
+  distances: DistanceMap,
   aId: string,
   bId: string,
   value: number,
@@ -97,7 +103,7 @@ type EngagementIntent =
 const getEngagementIntent = (
   attacker: Combatant,
   defender: Combatant,
-  distances: Record<string, number>,
+  distances: DistanceMap,
   ranged: RangedRoundSettings,
 ): EngagementIntent => {
   const attackerRanged = isRangedWeapon(attacker.weapon)
@@ -134,7 +140,7 @@ const getEngagementIntent = (
   return { type: 'attack', distanceFeet: meleeDistance }
 }
 
-const describeInjuryPenalty = (code: string): string => {
+const describeInjuryPenalty = (code: InjuryPenaltyCode): string => {
   switch (code) {
     case 'ET-5-INJURY-FP90':
       return 'Sérülési módosító: a max Fp több mint 90%-a elveszett, ezért -10 minden harcérték.'
@@ -155,7 +161,7 @@ const cloneCombatant = (c: Combatant): Combatant => ({
 
 const toSnapshot = (
   c: Combatant,
-  party: 'a' | 'b',
+  party: Party,
   injuryStatPenalties: boolean,
 ): CombatantSnapshot => {
   const effective = getEffectiveCombatValues(c, { injuryStatPenalties })
@@ -187,7 +193,7 @@ const selectTarget = (
   attacker: Combatant,
   enemies: Combatant[],
   strategy: TargetingStrategy,
-  partyOf: Map<string, 'a' | 'b'>,
+  partyOf: Map<string, Party>,
   injuryStatPenalties: boolean,
 ): Combatant | null => {
   const eligible = enemies.filter(e => e.status === 'active')
@@ -283,12 +289,12 @@ const groupSimultaneousSlots = (queue: ActionSlot[]): ActionSlot[][] => {
 export const resolveRound = (
   roundNumber: number,
   combatants: Map<string, Combatant>,
-  partyOf: Map<string, 'a' | 'b'>,
+  partyOf: Map<string, Party>,
   hadEpDamageLastRound: Set<string>,
   roller: DiceRoller,
   strategy: TargetingStrategy,
   rules: OptionalRules,
-  distances: Record<string, number>,
+  distances: DistanceMap,
   ranged: RangedRoundSettings,
   ruleHooks?: CombatRuleHooks,
 ): RoundResult => {
@@ -420,7 +426,7 @@ export const resolveRound = (
         continue
       }
 
-      const attackMode: 'melee' | 'ranged' = isRangedWeapon(attacker.weapon) ? 'ranged' : 'melee'
+      const attackMode: AttackMode = isRangedWeapon(attacker.weapon) ? 'ranged' : 'melee'
       const penalty = attackMode === 'melee' ? (outnumberedPenalties[target.id] ?? 0) : 0
       const targetSnap = toSnapshot(target, partyOf.get(target.id)!, injuryStatPenalties)
       const attackerSnap = toSnapshot(attacker, party, injuryStatPenalties)

@@ -1,4 +1,4 @@
-import type { Armor, Combatant } from './types'
+import type { Armor, Combatant, InjuryPenaltyCode } from './types'
 
 const getArmorMgt = (armor: Armor): number => (Number.isFinite(armor.mgt) ? armor.mgt : 0)
 
@@ -9,7 +9,7 @@ type InjuryPenalty = {
   te: number
   ve: number
   ce: number
-  code: 'ET-5-INJURY-FP90' | 'ET-5-INJURY-EP50' | 'ET-5-INJURY-EP75' | null
+  code: InjuryPenaltyCode | null
 }
 
 const NO_INJURY_PENALTY: InjuryPenalty = {

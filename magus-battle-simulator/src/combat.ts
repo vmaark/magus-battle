@@ -4,6 +4,7 @@
  */
 
 import type {
+  AttackMode,
   Combatant,
   AttackEvent,
   CombatantStatus,
@@ -39,7 +40,7 @@ export const resolveAttack = (
   rules: OptionalRules,
   attackerTeModifier = 0,
   attackerCeModifier = 0,
-  attackMode: 'melee' | 'ranged' = 'melee',
+  attackMode: AttackMode = 'melee',
   distanceFeet?: number,
   rangedDefenseBase?: number,
   externalRules: AppliedRule[] = [],

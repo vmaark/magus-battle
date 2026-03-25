@@ -1,9 +1,13 @@
 import type {
   Combatant,
+  DistanceKey,
+  DistanceMap,
   Encounter,
   EncounterOptions,
   EncounterResult,
   EncounterState,
+  EncounterWinner,
+  Party,
   RoundResult,
   CombatantPatch,
   CombatantSnapshot,
@@ -21,7 +25,8 @@ const DEFAULT_MAX_ROUNDS = 100
 const DEFAULT_CLOSE_DISTANCE_PER_ROUND = 39 // Gyorsaság 13, Futva (HR §2)
 const DEFAULT_MELEE_REACH_FEET = 5
 
-const distanceKey = (attackerId: string, defenderId: string): string => `${attackerId}->${defenderId}`
+const distanceKey = (attackerId: string, defenderId: string): DistanceKey =>
+  `${attackerId}->${defenderId}`
 const isRangedWeapon = (weapon: Combatant['weapon']): boolean =>
   weapon.attackMode === 'ranged' || weapon.ce > 0
 
@@ -42,8 +47,8 @@ export const createEncounter = (
   const defaultDistanceFeet = Math.max(0, options.ranged?.defaultDistanceFeet ?? 0)
 
   const combatants = new Map<string, Combatant>()
-  const partyOf = new Map<string, 'a' | 'b'>()
-  const distances: Record<string, number> = {}
+  const partyOf = new Map<string, Party>()
+  const distances: DistanceMap = {}
 
   for (const c of partyA) {
     combatants.set(c.id, { ...c })
@@ -67,7 +72,9 @@ export const createEncounter = (
       }
     }
   }
-  for (const [key, value] of Object.entries(options.ranged?.initialDistances ?? {})) {
+  for (const [key, value] of Object.entries(options.ranged?.initialDistances ?? {}) as Array<
+    [DistanceKey, number]
+  >) {
     distances[key] = Math.max(0, Math.floor(value))
   }
 
@@ -81,7 +88,7 @@ export const createEncounter = (
     return !aActive || !bActive
   }
 
-  const getWinner = (): 'a' | 'b' | 'draw' | null => {
+  const getWinner = (): EncounterWinner | null => {
     if (!isOverFn()) return null
     const vals = Array.from(combatants.values())
     const aActive = vals.some(c => partyOf.get(c.id) === 'a' && c.status === 'active')
@@ -91,7 +98,7 @@ export const createEncounter = (
     return 'draw'
   }
 
-  const toSnap = (c: Combatant, party: 'a' | 'b'): CombatantSnapshot => {
+  const toSnap = (c: Combatant, party: Party): CombatantSnapshot => {
     const effective = getEffectiveCombatValues(c, {
       injuryStatPenalties: rules.injuryStatPenalties,
     })
@@ -115,7 +122,7 @@ export const createEncounter = (
   }
 
   const getStateFn = (): EncounterState => {
-    const snap = (party: 'a' | 'b'): CombatantSnapshot[] =>
+    const snap = (party: Party): CombatantSnapshot[] =>
       Array.from(combatants.values())
         .filter(c => partyOf.get(c.id) === party)
         .map(c => toSnap(c, party))
@@ -173,12 +180,12 @@ export const createEncounter = (
     combatants.delete(id)
     partyOf.delete(id)
     hadEpDamageLastRound.delete(id)
-    for (const key of Object.keys(distances)) {
+    for (const key of Object.keys(distances) as DistanceKey[]) {
       if (key.startsWith(`${id}->`) || key.endsWith(`->${id}`)) delete distances[key]
     }
   }
 
-  const addCombatant = (party: 'a' | 'b', combatant: Combatant): void => {
+  const addCombatant = (party: Party, combatant: Combatant): void => {
     combatants.set(combatant.id, { ...combatant })
     partyOf.set(combatant.id, party)
     for (const other of combatants.values()) {

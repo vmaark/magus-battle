@@ -5,6 +5,12 @@
 
 /** Méretkategória — meghatározza a fegyver időigényét */
 export type WeaponCategory = 1 | 2 | 3 | 4 | 5
+export type AttackMode = 'melee' | 'ranged'
+export type Party = 'a' | 'b'
+export type EncounterWinner = Party | 'draw'
+export type InjuryPenaltyCode = 'ET-5-INJURY-FP90' | 'ET-5-INJURY-EP50' | 'ET-5-INJURY-EP75'
+export type DistanceKey = `${string}->${string}`
+export type DistanceMap = Partial<Record<DistanceKey, number>>
 
 /**
  * Szegmensköltség méretkategóriánként (harcrendszer.md §2)
@@ -24,7 +30,7 @@ export type Weapon = {
   name: string
   category: WeaponCategory
   /** Támadási mód: közelharci vagy távolsági (CÉ-alapú) */
-  attackMode?: 'melee' | 'ranged'
+  attackMode?: AttackMode
   /** Maximális hatótáv ynevi lábban (távolsági fegyvernél értelmezett) */
   rangeFeet?: number
   /** KÉ bónusz a fegyvertől */
@@ -95,7 +101,7 @@ export type AppliedRule = {
 export type CombatantSnapshot = {
   id: string
   name: string
-  party: 'a' | 'b'
+  party: Party
   ke: number
   te: number
   ve: number
@@ -160,7 +166,7 @@ export type EncounterOptions = {
     /** Alapértelmezett távolság ellentétes oldali felek között, ha bármelyik fél távolsági fegyvert használ. */
     defaultDistanceFeet?: number
     /** Kezdeti távolság-felülírások párokra. A kulcs formátuma: "attackerId->defenderId". */
-    initialDistances?: Record<string, number>
+    initialDistances?: DistanceMap
     /** Közelharcos zárkózási tempója körönként (ynevi láb). Alap: 39 (Gyorsaság 13, Futva). */
     closeDistancePerRound?: number
     /** Mekkora távolságtól tekintjük közelharcnak (ynevi láb). Alap: 5. */
@@ -200,7 +206,7 @@ export type AttackEvent = {
   /** Alaphelyzet CÉ + külső módosítók (távolsági támadás esetén releváns) */
   attackerCeTotal: number
   /** Támadási mód */
-  attackMode: 'melee' | 'ranged'
+  attackMode: AttackMode
   hit: boolean
   /** Nincs dobás, automatikus találat (pl. 0 Ép állapotban lévő célpont) */
   automaticHit: boolean
@@ -262,14 +268,14 @@ export type EncounterState = {
   partyA: CombatantSnapshot[]
   partyB: CombatantSnapshot[]
   /** Dinamikus támadó->védő távolságok kulcsolt térképe (attackerId->defenderId). */
-  distances: Record<string, number>
+  distances: DistanceMap
   isOver: boolean
-  winner: 'a' | 'b' | 'draw' | null
+  winner: EncounterWinner | null
 }
 
 export type EncounterResult = {
   rounds: RoundResult[]
-  winner: 'a' | 'b' | 'draw' | null
+  winner: EncounterWinner | null
 }
 
 export type Encounter = {
@@ -282,7 +288,7 @@ export type Encounter = {
   /** KM: harcos eltávolítása a csatából (menekülés, elfogás stb.) */
   removeCombatant: (id: string) => void
   /** KM: erősítés hozzáadása valamelyik csapathoz */
-  addCombatant: (party: 'a' | 'b', combatant: Combatant) => void
+  addCombatant: (party: Party, combatant: Combatant) => void
   /** Az ütközet aktuális állapotának pillanatfelvétele */
   getState: () => EncounterState
   /** Távolság beállítása két harcos között (id->id, ynevi láb). */
