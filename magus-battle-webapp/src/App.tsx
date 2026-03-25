@@ -197,7 +197,9 @@ const PartyTable = ({ title, party }: { title: string; party: CombatantSnapshot[
               </td>
               <td>
                 {c.weapon.name} ({c.weapon.damage})<br />
-                <span className="muted">{c.armor.name} SFÉ:{c.armor.sfe}</span>
+                <span className="muted">
+                  {c.armor.name} SFÉ:{c.armor.sfe} MGT:{c.armor.mgt}
+                </span>
               </td>
               <td>{c.ke}</td>
               <td>{c.te}</td>
@@ -240,6 +242,7 @@ const createEmptyCombatant = (partyPrefix: 'a' | 'b', idx: number): Combatant =>
   },
   armor: {
     name: 'Nincs',
+    mgt: 0,
     sfe: 0,
   },
   isPlayerCharacter: partyPrefix === 'a',
@@ -257,6 +260,7 @@ const getInitialScenario = (): Scenario => {
         targeting: 'random',
         maxRounds: 100,
         mandatoryEpFromFp: true,
+        injuryStatPenalties: true,
       },
     }
   }
@@ -349,7 +353,7 @@ const FighterEditor = ({
 
       <section className="editor-section combat">
         <h4>Harcértékek</h4>
-        <div className="fighter-grid stats4">
+        <div className="fighter-grid stats-inline">
           <label>
             KÉ
             <input
@@ -387,7 +391,7 @@ const FighterEditor = ({
 
       <section className="editor-section vitality">
         <h4>Életerő és állapot</h4>
-        <div className="fighter-grid stats4">
+        <div className="fighter-grid stats-inline vitality-row">
           <label>
             Max Ép
             <input
@@ -424,7 +428,7 @@ const FighterEditor = ({
               onChange={(e) => onUpdate(team, idx, (p) => ({ ...p, fp: Number(e.target.value) }))}
             />
           </label>
-          <label>
+          <label className="mini-field">
             Állapot
             <select
               value={c.status}
@@ -442,9 +446,9 @@ const FighterEditor = ({
 
       <section className="editor-section weapon">
         <h4>Fegyver</h4>
-        <div className="fighter-grid weapon-grid">
+        <div className="fighter-grid weapon-main">
           <label>
-            Név (kereshető lista)
+            Név
             <div className="search-select">
               <input
                 ref={weaponInputRef}
@@ -488,7 +492,7 @@ const FighterEditor = ({
               ))}
             </datalist>
           </label>
-          <label>
+          <label className="mini-field">
             Kategória
             <select
               value={String(c.weapon.category)}
@@ -506,7 +510,9 @@ const FighterEditor = ({
               <option value="5">5</option>
             </select>
           </label>
-          <label>
+        </div>
+        <div className="fighter-grid stats-inline weapon-stats">
+          <label className="damage-field">
             Sebzés
             <input
               value={c.weapon.damage}
@@ -563,9 +569,9 @@ const FighterEditor = ({
 
       <section className="editor-section armor">
         <h4>Páncél</h4>
-        <div className="fighter-grid compact">
+        <div className="fighter-grid armor-main">
           <label>
-            Név (kereshető lista)
+            Név
             <div className="search-select">
               <input
                 ref={armorInputRef}
@@ -580,6 +586,7 @@ const FighterEditor = ({
                       ? {
                           ...p.armor,
                           name: preset.name,
+                          mgt: preset.mgt,
                           sfe: preset.sfe,
                         }
                       : { ...p.armor, name: selectedName },
@@ -604,13 +611,23 @@ const FighterEditor = ({
               ))}
             </datalist>
           </label>
-          <label>
+          <label className="mini-field">
             SFÉ
             <input
               type="number"
               value={c.armor.sfe}
               onChange={(e) =>
                 onUpdate(team, idx, (p) => ({ ...p, armor: { ...p.armor, sfe: Number(e.target.value) } }))
+              }
+            />
+          </label>
+          <label className="mini-field">
+            MGT
+            <input
+              type="number"
+              value={c.armor.mgt}
+              onChange={(e) =>
+                onUpdate(team, idx, (p) => ({ ...p, armor: { ...p.armor, mgt: Number(e.target.value) } }))
               }
             />
           </label>
@@ -662,6 +679,9 @@ export default function App() {
   const [mandatoryEpFromFp, setMandatoryEpFromFp] = useState(
     initialScenario.settings?.mandatoryEpFromFp ?? true,
   )
+  const [injuryStatPenalties, setInjuryStatPenalties] = useState(
+    initialScenario.settings?.injuryStatPenalties ?? true,
+  )
   const [maxRounds, setMaxRounds] = useState(100)
   const [diceQueueInput, setDiceQueueInput] = useState('')
   const [interactiveMode, setInteractiveMode] = useState(false)
@@ -706,6 +726,7 @@ export default function App() {
       targeting,
       maxRounds,
       mandatoryEpFromFp,
+      injuryStatPenalties,
     },
   })
 
@@ -786,6 +807,14 @@ export default function App() {
                     onChange={(e) => setMandatoryEpFromFp(e.target.checked)}
                   />
                   Kötelező Ép veszteség (minden 5 Fp után 1 Ép)
+                </div>
+                <div className="inline-setting">
+                  <input
+                    type="checkbox"
+                    checked={injuryStatPenalties}
+                    onChange={(e) => setInjuryStatPenalties(e.target.checked)}
+                  />
+                  Sérülési harcérték-módosítók (Ép/Fp veszteség alapján)
                 </div>
               </label>
             </div>

@@ -14,6 +14,8 @@ export type Scenario = {
     maxRounds?: number
     /** Kötelező Ép veszteség szabály (minden 5 Fp → 1 Ép) — alapértelmezés: true */
     mandatoryEpFromFp?: boolean
+    /** Sérülési harcérték-módosítók (eletero.md §5) — alapértelmezés: true */
+    injuryStatPenalties?: boolean
   }
 }
 
@@ -50,6 +52,7 @@ export const parseScenario = (raw: unknown): ParsedScenario => {
       targeting,
       optionalRules: {
         mandatoryEpFromFp: s.settings?.mandatoryEpFromFp ?? true,
+        injuryStatPenalties: s.settings?.injuryStatPenalties ?? true,
       },
     },
     maxRounds: s.settings?.maxRounds ?? 100,

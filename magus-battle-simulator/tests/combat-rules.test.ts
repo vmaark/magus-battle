@@ -13,7 +13,7 @@ const makeCombatant = (overrides: Partial<Combatant>): Combatant => ({
   maxFp: 10,
   fp: 10,
   weapon: { name: 'Kard', category: 3, ke: 0, te: 0, ve: 0, ce: 0, damage: '1k6' },
-  armor: { name: 'Nincs', sfe: 0 },
+  armor: { name: 'Nincs', mgt: 0, sfe: 0 },
   isPlayerCharacter: false,
   status: 'active',
   ...overrides,
@@ -34,12 +34,15 @@ describe('combat rules parity', () => {
       id: 'd',
       te: 0,
       ve: 100,
-      armor: { name: 'Vért', sfe: 5 },
+      armor: { name: 'Vért', mgt: 0, sfe: 5 },
       fp: 10,
       ep: 10,
     })
     const roller = queueRoller([50, 1])
-    const event = resolveAttack(1, attacker, defender, defender.ve, 5, roller, { mandatoryEpFromFp: true })
+    const event = resolveAttack(1, attacker, defender, defender.ve, 5, roller, {
+      mandatoryEpFromFp: true,
+      injuryStatPenalties: true,
+    })
 
     expect(event.hit).toBe(true)
     expect(event.damage).toBe(0)
@@ -52,7 +55,10 @@ describe('combat rules parity', () => {
     const attacker = makeCombatant({ id: 'a' })
     const defender = makeCombatant({ id: 'd', ep: 0, fp: 4, status: 'unconscious' })
     const roller = queueRoller([50, 1])
-    const event = resolveAttack(1, attacker, defender, defender.ve, 5, roller, { mandatoryEpFromFp: true })
+    const event = resolveAttack(1, attacker, defender, defender.ve, 5, roller, {
+      mandatoryEpFromFp: true,
+      injuryStatPenalties: true,
+    })
 
     expect(event.automaticHit).toBe(true)
     expect(event.automaticFatal).toBe(true)
@@ -98,7 +104,7 @@ describe('combat rules parity', () => {
       defender.ve,
       5,
       queueRoller([100, 1]),
-      { mandatoryEpFromFp: true },
+      { mandatoryEpFromFp: true, injuryStatPenalties: true },
     )
 
     expect(event.appliedRules.length).toBeGreaterThan(0)
@@ -143,5 +149,94 @@ describe('combat rules parity', () => {
     expect(event.hit).toBe(true)
     expect(event.attackerTeTotal).toBe(80)
     expect(event.appliedRules.some(r => r.ref.code === 'HR-10-HIGH-GROUND')).toBe(true)
+  })
+
+  test('pancel MGT csokkenti a harcerteket (KE/TE/VE/CE)', () => {
+    const a = makeCombatant({
+      id: 'a',
+      name: 'A',
+      ke: 10,
+      te: 60,
+      ve: 50,
+      ce: 10,
+      armor: { name: 'Felvertezet', mgt: -4, sfe: 5 },
+      weapon: { name: 'Kard', category: 3, ke: 0, te: 0, ve: 0, ce: 0, damage: '1k1' },
+    })
+    const b = makeCombatant({
+      id: 'b',
+      name: 'B',
+      ve: 60,
+      armor: { name: 'Nincs', mgt: 0, sfe: 0 },
+      weapon: { name: 'Kard', category: 3, ke: 0, te: 0, ve: 0, ce: 0, damage: '1k1' },
+    })
+
+    const encounter = createEncounter([a], [b], {
+      roller: queueRoller([5, 5, 1, 1, 1, 1, 1, 1, 1, 1]),
+      targeting: 'random',
+    })
+    const round = encounter.nextRound()
+    const event = round.events.find((e) => e.attackerId === 'a')
+    const attackerAfter = round.stateAfter.find((s) => s.id === 'a')
+
+    expect(event).toBeDefined()
+    expect(event?.attackerTeTotal).toBe(56)
+    expect(attackerAfter?.ke).toBe(6)
+    expect(attackerAfter?.te).toBe(56)
+    expect(attackerAfter?.ve).toBe(46)
+    expect(attackerAfter?.ce).toBe(6)
+  })
+
+  test('serulesi modositok: max Fp >90% veszteseg eseten -10 minden harcertek', () => {
+    const a = makeCombatant({
+      id: 'a',
+      name: 'A',
+      ke: 20,
+      te: 60,
+      ve: 55,
+      ce: 30,
+      maxFp: 100,
+      fp: 9,
+      armor: { name: 'Nincs', mgt: 0, sfe: 0 },
+    })
+    const b = makeCombatant({ id: 'b', name: 'B' })
+    const encounter = createEncounter([a], [b], {
+      roller: queueRoller([1, 1, 1, 1]),
+      targeting: 'random',
+    })
+    const state = encounter.getState()
+    const attacker = state.partyA[0]
+
+    expect(attacker.ke).toBe(10)
+    expect(attacker.te).toBe(50)
+    expect(attacker.ve).toBe(45)
+    expect(attacker.ce).toBe(20)
+  })
+
+  test('serulesi modositok: 75% Ep vesztesegnel a legsulyosabb buntetes ervenyes', () => {
+    const a = makeCombatant({
+      id: 'a',
+      name: 'A',
+      ke: 20,
+      te: 60,
+      ve: 55,
+      ce: 40,
+      maxEp: 20,
+      ep: 5,
+      maxFp: 100,
+      fp: 5,
+      armor: { name: 'Nincs', mgt: 0, sfe: 0 },
+    })
+    const b = makeCombatant({ id: 'b', name: 'B' })
+    const encounter = createEncounter([a], [b], {
+      roller: queueRoller([1, 1, 1, 1]),
+      targeting: 'random',
+    })
+    const state = encounter.getState()
+    const attacker = state.partyA[0]
+
+    expect(attacker.ke).toBe(10)
+    expect(attacker.te).toBe(40)
+    expect(attacker.ve).toBe(45)
+    expect(attacker.ce).toBe(10)
   })
 })

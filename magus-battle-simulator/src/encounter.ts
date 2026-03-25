@@ -14,8 +14,9 @@ import type {
 import { defaultRoller } from './dice'
 import { deriveStatus } from './combat'
 import { resolveRound } from './round'
+import { getEffectiveCombatValues } from './stat-modifiers'
 
-const DEFAULT_RULES: OptionalRules = { mandatoryEpFromFp: true }
+const DEFAULT_RULES: OptionalRules = { mandatoryEpFromFp: true, injuryStatPenalties: true }
 const DEFAULT_MAX_ROUNDS = 100
 
 export const createEncounter = (
@@ -60,14 +61,18 @@ export const createEncounter = (
     return 'draw'
   }
 
-  const toSnap = (c: Combatant, party: 'a' | 'b'): CombatantSnapshot => ({
+  const toSnap = (c: Combatant, party: 'a' | 'b'): CombatantSnapshot => {
+    const effective = getEffectiveCombatValues(c, {
+      injuryStatPenalties: rules.injuryStatPenalties,
+    })
+    return {
     id: c.id,
     name: c.name,
     party,
-    ke: c.ke,
-    te: c.te,
-    ve: c.ve,
-    ce: c.ce,
+    ke: effective.ke,
+    te: effective.te,
+    ve: effective.ve,
+    ce: effective.ce,
     fp: c.fp,
     maxFp: c.maxFp,
     ep: c.ep,
@@ -76,7 +81,8 @@ export const createEncounter = (
     weapon: c.weapon,
     armor: c.armor,
     targetId: c.targetId,
-  })
+    }
+  }
 
   const getStateFn = (): EncounterState => {
     const snap = (party: 'a' | 'b'): CombatantSnapshot[] =>

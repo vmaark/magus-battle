@@ -7,6 +7,7 @@ export type Scenario = {
     targeting?: string
     maxRounds?: number
     mandatoryEpFromFp?: boolean
+    injuryStatPenalties?: boolean
   }
 }
 
@@ -44,6 +45,7 @@ export const parseScenario = (raw: unknown): ParsedScenario => {
       targeting,
       optionalRules: {
         mandatoryEpFromFp: s.settings?.mandatoryEpFromFp ?? true,
+        injuryStatPenalties: s.settings?.injuryStatPenalties ?? true,
       },
     },
     maxRounds: s.settings?.maxRounds ?? 100,
@@ -72,7 +74,7 @@ export const DEFAULT_SCENARIO = `{
         "ce": 0,
         "damage": "2k6"
       },
-      "armor": { "name": "Láncing", "sfe": 4 },
+      "armor": { "name": "Láncing", "mgt": -1, "sfe": 4 },
       "isPlayerCharacter": true,
       "status": "active"
     },
@@ -96,7 +98,7 @@ export const DEFAULT_SCENARIO = `{
         "ce": 4,
         "damage": "2k6+1"
       },
-      "armor": { "name": "Bőrvért", "sfe": 2 },
+      "armor": { "name": "Bőrvért", "mgt": 0, "sfe": 2 },
       "isPlayerCharacter": true,
       "status": "active"
     }
@@ -122,7 +124,7 @@ export const DEFAULT_SCENARIO = `{
         "ce": 0,
         "damage": "1k10"
       },
-      "armor": { "name": "Fémpikkelyes", "sfe": 5 },
+      "armor": { "name": "Fémpikkelyes", "mgt": -2, "sfe": 5 },
       "isPlayerCharacter": false,
       "status": "active"
     },
@@ -146,7 +148,7 @@ export const DEFAULT_SCENARIO = `{
         "ce": 0,
         "damage": "2k6+1"
       },
-      "armor": { "name": "Bőrvért", "sfe": 2 },
+      "armor": { "name": "Bőrvért", "mgt": 0, "sfe": 2 },
       "isPlayerCharacter": false,
       "status": "active",
       "targetId": "kardos-peter"
@@ -171,7 +173,7 @@ export const DEFAULT_SCENARIO = `{
         "ce": 5,
         "damage": "1k6"
       },
-      "armor": { "name": "Nincs", "sfe": 0 },
+      "armor": { "name": "Nincs", "mgt": 0, "sfe": 0 },
       "isPlayerCharacter": false,
       "status": "active"
     }
@@ -179,7 +181,8 @@ export const DEFAULT_SCENARIO = `{
   "settings": {
     "targeting": "random",
     "maxRounds": 50,
-    "mandatoryEpFromFp": true
+    "mandatoryEpFromFp": true,
+    "injuryStatPenalties": true
   }
 }
 `

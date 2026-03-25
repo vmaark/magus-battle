@@ -97,7 +97,7 @@ select {
   border-radius: 4px;
   background: #0b1107;
   color: var(--text);
-  padding: 10px;
+  padding: 4px 6px;
   min-width: 0;
 }
 
@@ -183,6 +183,22 @@ textarea {
   text-align: right;
 }
 
+.fighter-grid.stats-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.fighter-grid.stats-inline > label {
+  width: auto;
+  min-width: 72px;
+  margin-bottom: 0;
+}
+
+.fighter-grid.stats-inline input[type='number'] {
+  margin-top: 4px;
+}
+
 .editor-sections {
   display: grid;
   gap: 8px;
@@ -214,12 +230,43 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
-.fighter-grid.stats4 {
-  grid-template-columns: repeat(4, minmax(100px, 1fr));
+.fighter-grid.weapon-main {
+  grid-template-columns: minmax(220px, 1fr) max-content max-content;
+  align-items: end;
+  margin-bottom: 8px;
 }
 
-.fighter-grid.weapon-grid {
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
+.damage-field input {
+  width: 40%;
+  min-width: 0;
+}
+
+.fighter-grid.weapon-stats {
+  margin-top: 2px;
+}
+
+.fighter-grid.armor-main {
+  grid-template-columns: minmax(220px, 1fr) max-content max-content;
+  align-items: end;
+}
+
+.mini-field {
+  width: max-content;
+  min-width: 74px;
+}
+
+.mini-field select {
+  width: auto;
+  min-width: 74px;
+  padding-right: 24px;
+}
+
+.fighter-grid.vitality-row {
+  flex-wrap: nowrap;
+  align-items: end;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
 }
 
 .search-select {
@@ -254,9 +301,15 @@ textarea {
     grid-column: auto;
   }
 
-  .fighter-grid.stats4,
-  .fighter-grid.weapon-grid {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  .fighter-grid.weapon-main,
+  .fighter-grid.armor-main {
+    grid-template-columns: 1fr;
+  }
+
+  .mini-field,
+  .mini-field select {
+    width: 100%;
+    min-width: 0;
   }
 }
 

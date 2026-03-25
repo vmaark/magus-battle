@@ -17,6 +17,7 @@ import type {
 } from './types'
 import { SEGMENT_COST, ROUND_SEGMENTS } from './types'
 import { deriveStatus, resolveAttack } from './combat'
+import { getEffectiveCombatValues } from './stat-modifiers'
 
 /** Túlerő miatti VÉ-levonás (harcrendszer.md §11) */
 const OUTNUMBERED_VE_PENALTY: Record<number, number> = {
@@ -37,20 +38,39 @@ type ActionSlot = {
   lostInitiative: boolean
 }
 
+const describeInjuryPenalty = (code: string): string => {
+  switch (code) {
+    case 'ET-5-INJURY-FP90':
+      return 'Sérülési módosító: a max Fp több mint 90%-a elveszett, ezért -10 minden harcérték.'
+    case 'ET-5-INJURY-EP50':
+      return 'Sérülési módosító: a max Ép legalább fele elveszett, ezért -10 minden harcérték.'
+    case 'ET-5-INJURY-EP75':
+      return 'Sérülési módosító: a max Ép legalább háromnegyede elveszett, ezért KÉ -10, TÉ -20, VÉ -10, CÉ -30.'
+    default:
+      return 'Sérülési módosító alkalmazva.'
+  }
+}
+
 const cloneCombatant = (c: Combatant): Combatant => ({
   ...c,
   weapon: { ...c.weapon },
   armor: { ...c.armor },
 })
 
-const toSnapshot = (c: Combatant, party: 'a' | 'b'): CombatantSnapshot => ({
+const toSnapshot = (
+  c: Combatant,
+  party: 'a' | 'b',
+  injuryStatPenalties: boolean,
+): CombatantSnapshot => {
+  const effective = getEffectiveCombatValues(c, { injuryStatPenalties })
+  return {
+  ke: effective.ke,
+  te: effective.te,
+  ve: effective.ve,
+  ce: effective.ce,
   id: c.id,
   name: c.name,
   party,
-  ke: c.ke,
-  te: c.te,
-  ve: c.ve,
-  ce: c.ce,
   fp: c.fp,
   maxFp: c.maxFp,
   ep: c.ep,
@@ -59,7 +79,8 @@ const toSnapshot = (c: Combatant, party: 'a' | 'b'): CombatantSnapshot => ({
   weapon: c.weapon,
   armor: c.armor,
   targetId: c.targetId,
-})
+  }
+}
 
 /**
  * Célpont kiválasztása stratégia alapján.
@@ -71,6 +92,7 @@ const selectTarget = (
   enemies: Combatant[],
   strategy: TargetingStrategy,
   partyOf: Map<string, 'a' | 'b'>,
+  injuryStatPenalties: boolean,
 ): Combatant | null => {
   const eligible = enemies.filter(e => e.status === 'active')
   if (eligible.length === 0) return null
@@ -91,12 +113,19 @@ const selectTarget = (
     })
   }
   if (strategy === 'strongest') {
-    return eligible.reduce((max, c) => (c.te > max.te ? c : max))
+    return eligible.reduce((max, c) =>
+      getEffectiveCombatValues(c, { injuryStatPenalties }).te >
+        getEffectiveCombatValues(max, { injuryStatPenalties }).te
+        ? c
+        : max,
+    )
   }
 
   // Egyéni függvény: pillanatfelvételekkel hívjuk meg
-  const attackerSnap = toSnapshot(attacker, partyOf.get(attacker.id)!)
-  const enemySnaps = eligible.map(e => toSnapshot(e, partyOf.get(e.id)!))
+  const attackerSnap = toSnapshot(attacker, partyOf.get(attacker.id)!, injuryStatPenalties)
+  const enemySnaps = eligible.map((e) =>
+    toSnapshot(e, partyOf.get(e.id)!, injuryStatPenalties),
+  )
   const targetId = (strategy as (a: CombatantSnapshot, e: CombatantSnapshot[]) => string)(
     attackerSnap,
     enemySnaps,
@@ -167,6 +196,7 @@ export const resolveRound = (
 ): RoundResult => {
   const all = Array.from(combatants.values())
   const active = all.filter(c => c.status === 'active')
+  const injuryStatPenalties = rules.injuryStatPenalties
 
   // 1. Kezdeményező dobások (harcrendszer.md §5)
   const initiatives: Record<string, { die: number; total: number; lost: boolean }> = {}
@@ -175,7 +205,9 @@ export const resolveRound = (
   for (const c of active) {
     const lost = hadEpDamageLastRound.has(c.id)
     const die = lost ? 0 : roller(10)
-    const total = lost ? -1 : die + c.ke
+    const total = lost
+      ? -1
+      : die + getEffectiveCombatValues(c, { injuryStatPenalties }).ke
     initiatives[c.id] = { die, total, lost }
     initiativeEntries.push({ combatantId: c.id, name: c.name, die, total, lostInitiative: lost })
   }
@@ -191,7 +223,7 @@ export const resolveRound = (
     const enemies = all.filter(
       c => partyOf.get(c.id) !== partyOf.get(attacker.id) && c.status === 'active',
     )
-    const target = selectTarget(attacker, enemies, strategy, partyOf)
+    const target = selectTarget(attacker, enemies, strategy, partyOf, injuryStatPenalties)
     if (target) {
       attackerCountPerTarget.set(target.id, (attackerCountPerTarget.get(target.id) ?? 0) + 1)
     }
@@ -230,12 +262,12 @@ export const resolveRound = (
       const enemies = Array.from(snapshot.values()).filter(
         c => partyOf.get(c.id) !== party && c.status === 'active',
       )
-      const target = selectTarget(attacker, enemies, strategy, partyOf)
+      const target = selectTarget(attacker, enemies, strategy, partyOf, injuryStatPenalties)
       if (!target) continue
 
       const penalty = outnumberedPenalties[target.id] ?? 0
-      const targetSnap = toSnapshot(target, partyOf.get(target.id)!)
-      const attackerSnap = toSnapshot(attacker, party)
+      const targetSnap = toSnapshot(target, partyOf.get(target.id)!, injuryStatPenalties)
+      const attackerSnap = toSnapshot(attacker, party, injuryStatPenalties)
 
       const modifier = ruleHooks?.resolveAttackModifiers?.({
         round: roundNumber,
@@ -259,10 +291,30 @@ export const resolveRound = (
         })
       }
 
-      const effectiveVe = target.ve - penalty + defenderVeModifier
+      const targetEffective = getEffectiveCombatValues(target, { injuryStatPenalties })
+      const attackerEffective = getEffectiveCombatValues(attacker, {
+        injuryStatPenalties,
+      })
+      if (attackerEffective.injury.code) {
+        appliedRules.push({
+          ref: { code: attackerEffective.injury.code, source: 'eletero', section: '§5' },
+          explanation: describeInjuryPenalty(attackerEffective.injury.code),
+        })
+      }
+      if (targetEffective.injury.code) {
+        appliedRules.push({
+          ref: { code: targetEffective.injury.code, source: 'eletero', section: '§5' },
+          explanation: describeInjuryPenalty(targetEffective.injury.code),
+        })
+      }
+      const effectiveVe = targetEffective.ve - penalty + defenderVeModifier
+      const effectiveAttacker = {
+        ...attacker,
+        ...attackerEffective,
+      }
       const event = resolveAttack(
         roundNumber,
-        attacker,
+        effectiveAttacker,
         target,
         effectiveVe,
         slot.segment,
@@ -289,8 +341,8 @@ export const resolveRound = (
   }
 
   // 6. Kör végi állapot-pillanatfelvétel
-  const stateAfter = Array.from(combatants.values()).map(c =>
-    toSnapshot(c, partyOf.get(c.id)!),
+  const stateAfter = Array.from(combatants.values()).map((c) =>
+    toSnapshot(c, partyOf.get(c.id)!, injuryStatPenalties),
   )
 
   return { round: roundNumber, initiatives: initiativeEntries, outnumberedPenalties, events, stateAfter }

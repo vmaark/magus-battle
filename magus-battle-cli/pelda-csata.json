@@ -20,7 +20,7 @@
         "ce": 0,
         "damage": "2k6"
       },
-      "armor": { "name": "Láncing", "sfe": 4 },
+      "armor": { "name": "Láncing", "mgt": -1, "sfe": 4 },
       "isPlayerCharacter": true,
       "status": "active"
     },
@@ -44,7 +44,7 @@
         "ce": 4,
         "damage": "2k6+1"
       },
-      "armor": { "name": "Bőrvért", "sfe": 2 },
+      "armor": { "name": "Bőrvért", "mgt": 0, "sfe": 2 },
       "isPlayerCharacter": true,
       "status": "active"
     }
@@ -70,7 +70,7 @@
         "ce": 0,
         "damage": "1k10"
       },
-      "armor": { "name": "Fémpikkelyes", "sfe": 5 },
+      "armor": { "name": "Fémpikkelyes", "mgt": -2, "sfe": 5 },
       "isPlayerCharacter": false,
       "status": "active"
     },
@@ -94,7 +94,7 @@
         "ce": 0,
         "damage": "2k6+1"
       },
-      "armor": { "name": "Bőrvért", "sfe": 2 },
+      "armor": { "name": "Bőrvért", "mgt": 0, "sfe": 2 },
       "isPlayerCharacter": false,
       "status": "active",
       "targetId": "kardos-peter"
@@ -119,7 +119,7 @@
         "ce": 5,
         "damage": "1k6"
       },
-      "armor": { "name": "Nincs", "sfe": 0 },
+      "armor": { "name": "Nincs", "mgt": 0, "sfe": 0 },
       "isPlayerCharacter": false,
       "status": "active"
     }
@@ -127,6 +127,7 @@
   "settings": {
     "targeting": "random",
     "maxRounds": 50,
-    "mandatoryEpFromFp": true
+    "mandatoryEpFromFp": true,
+    "injuryStatPenalties": true
   }
 }

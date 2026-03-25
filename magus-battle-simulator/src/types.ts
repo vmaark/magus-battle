@@ -37,6 +37,8 @@ export type Weapon = {
 
 export type Armor = {
   name: string
+  /** Mozgásgátló tényező — harcértékekre (KÉ/TÉ/VÉ/CÉ) alkalmazott módosító */
+  mgt: number
   /** Sebzésfelfogó érték — ennyi vonódik le a becsapódó sebzésből */
   sfe: number
 }
@@ -116,6 +118,15 @@ export type OptionalRules = {
    * Alapértelmezés: true
    */
   mandatoryEpFromFp: boolean
+  /**
+   * Sérülési harcérték-módosítók (eletero.md §5):
+   * - Max Fp >90% elveszett: -10 minden harcérték
+   * - Max Ép >=50% elveszett: -10 minden harcérték
+   * - Max Ép >=75% elveszett: KÉ -10, TÉ -20, VÉ -10, CÉ -30
+   * A módosítók nem adódnak össze.
+   * Alapértelmezés: true
+   */
+  injuryStatPenalties: boolean
 }
 
 export type AttackModifierContext = {
