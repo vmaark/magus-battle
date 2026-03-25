@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import type {
   RoundResult,
-  AttackEvent,
+  CombatEvent,
   CombatantSnapshot,
   EncounterResult,
   InitiativeEntry,
@@ -72,7 +72,24 @@ const renderInitiatives = (entries: InitiativeEntry[]): string => {
   return lines.join('\n')
 }
 
-const renderEvent = (e: AttackEvent): string => {
+const renderEvent = (e: CombatEvent): string => {
+  if (e.eventType === 'action') {
+    const lines = [
+      `\n  ${chalk.bold(e.actorName)}${e.targetName ? ` → ${chalk.bold(e.targetName)}` : ''}`,
+      `    ${chalk.yellow(e.actionType === 'close_distance' ? '↣ ZÁRKÓZÁS' : '… NINCS VÉGREHAJTHATÓ TÁMADÁS')}`,
+    ]
+    if (e.reason) lines.push(`    ${chalk.dim(e.reason)}`)
+    if (e.distanceBeforeFeet !== undefined && e.distanceAfterFeet !== undefined) {
+      lines.push(`    Távolság: ${e.distanceBeforeFeet} → ${e.distanceAfterFeet} láb`)
+    }
+    if (e.appliedRules.length > 0) {
+      lines.push(`    ${chalk.dim('Szabályok:')}`)
+      for (const rule of e.appliedRules) {
+        lines.push(`      ${chalk.dim(`- ${rule.ref.code} (${rule.ref.source} ${rule.ref.section}): ${rule.explanation}`)}`)
+      }
+    }
+    return lines.join('\n')
+  }
   const w = e.attackerWeapon
   const weaponStr = `${w.name} (${w.damage})`
   const lines = [
@@ -86,7 +103,9 @@ const renderEvent = (e: AttackEvent): string => {
 
   const rollStr = e.automaticHit
     ? `Támadó dobás: ${chalk.bold('nincs')} (automatikus találat szabály alapján)`
-    : `k100: ${chalk.bold(String(e.roll))} + TÉ ${e.attackerTeTotal} = ${chalk.bold(String(e.attackTotal))}`
+    : e.attackMode === 'ranged'
+      ? `k100: ${chalk.bold(String(e.roll))} + CÉ ${e.attackerCeTotal} = ${chalk.bold(String(e.attackTotal))}`
+      : `k100: ${chalk.bold(String(e.roll))} + TÉ ${e.attackerTeTotal} = ${chalk.bold(String(e.attackTotal))}`
   const veStr = `VÉ ${e.defenderVe}`
 
   let hitLabel: string
@@ -178,7 +197,7 @@ export const renderRound = (result: RoundResult): string => {
 
   if (result.events.length > 0) {
     parts.push('')
-    const segmentGroups = new Map<number, AttackEvent[]>()
+    const segmentGroups = new Map<number, CombatEvent[]>()
     for (const e of result.events) {
       const group = segmentGroups.get(e.segment) ?? []
       group.push(e)

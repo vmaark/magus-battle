@@ -7,7 +7,8 @@ import type {
   Combatant,
   RoundResult,
   InitiativeEntry,
-  AttackEvent,
+  CombatEvent,
+  ActionEvent,
   DiceRoller,
   TargetingStrategy,
   OptionalRules,
@@ -36,6 +37,101 @@ type ActionSlot = {
   segment: number
   initiative: number
   lostInitiative: boolean
+}
+
+type RangedRoundSettings = {
+  closeDistancePerRound: number
+  meleeReachFeet: number
+}
+
+const distanceKey = (attackerId: string, defenderId: string): string => `${attackerId}->${defenderId}`
+
+const isRangedWeapon = (weapon: Combatant['weapon']): boolean =>
+  weapon.attackMode === 'ranged' || weapon.ce > 0
+
+const getWeaponRange = (weapon: Combatant['weapon']): number | null => {
+  if (Number.isFinite(weapon.rangeFeet)) return Math.max(0, Number(weapon.rangeFeet))
+  return null
+}
+
+const getPairDistance = (
+  distances: Record<string, number>,
+  aId: string,
+  bId: string,
+): number | null => {
+  const direct = distances[distanceKey(aId, bId)]
+  if (Number.isFinite(direct)) return Math.max(0, Number(direct))
+  const reverse = distances[distanceKey(bId, aId)]
+  if (Number.isFinite(reverse)) return Math.max(0, Number(reverse))
+  return null
+}
+
+const setPairDistance = (
+  distances: Record<string, number>,
+  aId: string,
+  bId: string,
+  value: number,
+): void => {
+  const normalized = Math.max(0, Math.floor(value))
+  distances[distanceKey(aId, bId)] = normalized
+  distances[distanceKey(bId, aId)] = normalized
+}
+
+type EngagementIntent =
+  | {
+      type: 'attack'
+      distanceFeet: number | null
+      rangedDefenseBase?: number
+    }
+  | {
+      type: 'close_distance'
+      distanceFeet: number
+      reason: string
+    }
+  | {
+      type: 'invalid'
+      reason: string
+      distanceFeet: number | null
+    }
+
+const getEngagementIntent = (
+  attacker: Combatant,
+  defender: Combatant,
+  distances: Record<string, number>,
+  ranged: RangedRoundSettings,
+): EngagementIntent => {
+  const attackerRanged = isRangedWeapon(attacker.weapon)
+  const defenderRanged = isRangedWeapon(defender.weapon)
+  const distanceFeet = getPairDistance(distances, attacker.id, defender.id)
+  const meleeDistance = distanceFeet ?? 0
+
+  if (attackerRanged) {
+    const rangeFeet = getWeaponRange(attacker.weapon)
+    if (rangeFeet !== null && meleeDistance > rangeFeet) {
+      return {
+        type: 'close_distance',
+        distanceFeet: meleeDistance,
+        reason: `A célpont ${meleeDistance} lábra van, ami kívül esik a fegyver ${rangeFeet} lábas hatótávján, ezért a támadó közelebb zárkózik.`,
+      }
+    }
+    return {
+      type: 'attack',
+      distanceFeet: meleeDistance,
+      rangedDefenseBase: meleeDistance + 50,
+    }
+  }
+
+  // Közelharcos csak akkor támadhat távolságon, ha a másik is közelharci közelségben van.
+  if (defenderRanged && meleeDistance > ranged.meleeReachFeet) {
+    return {
+      type: 'close_distance',
+      distanceFeet: meleeDistance,
+      reason:
+        'A célpont távolsági harcos és még nincs közelharci távolságban, ezért a támadó zárkózik.',
+    }
+  }
+
+  return { type: 'attack', distanceFeet: meleeDistance }
 }
 
 const describeInjuryPenalty = (code: string): string => {
@@ -192,6 +288,8 @@ export const resolveRound = (
   roller: DiceRoller,
   strategy: TargetingStrategy,
   rules: OptionalRules,
+  distances: Record<string, number>,
+  ranged: RangedRoundSettings,
   ruleHooks?: CombatRuleHooks,
 ): RoundResult => {
   const all = Array.from(combatants.values())
@@ -225,7 +323,10 @@ export const resolveRound = (
     )
     const target = selectTarget(attacker, enemies, strategy, partyOf, injuryStatPenalties)
     if (target) {
-      attackerCountPerTarget.set(target.id, (attackerCountPerTarget.get(target.id) ?? 0) + 1)
+      const intent = getEngagementIntent(attacker, target, distances, ranged)
+      if (intent.type === 'attack') {
+        attackerCountPerTarget.set(target.id, (attackerCountPerTarget.get(target.id) ?? 0) + 1)
+      }
     }
   }
 
@@ -239,14 +340,16 @@ export const resolveRound = (
   const queue = buildActionQueue(active, initiatives)
 
   // 5. Akciók végrehajtása
-  const events: AttackEvent[] = []
+  const events: CombatEvent[] = []
   const groups = groupSimultaneousSlots(queue)
+  const spentMovementThisRound = new Set<string>()
 
   for (const group of groups) {
     // Azonos szegmens + azonos kezdeményezés esetén egyidejű végrehajtás:
     // minden ilyen támadó cselekedhet, ha a csoport elején még aktív volt.
     const snapshot = new Map<string, Combatant>()
     for (const c of combatants.values()) snapshot.set(c.id, cloneCombatant(c))
+    const distanceSnapshot = { ...distances }
     const activeAtGroupStart = new Set(
       group
         .map(s => s.combatantId)
@@ -255,6 +358,7 @@ export const resolveRound = (
 
     for (const slot of group) {
       if (!activeAtGroupStart.has(slot.combatantId)) continue
+      if (spentMovementThisRound.has(slot.combatantId)) continue
       const attacker = snapshot.get(slot.combatantId)
       if (!attacker) continue
 
@@ -264,8 +368,60 @@ export const resolveRound = (
       )
       const target = selectTarget(attacker, enemies, strategy, partyOf, injuryStatPenalties)
       if (!target) continue
+      const intent = getEngagementIntent(attacker, target, distanceSnapshot, ranged)
+      if (intent.type === 'close_distance') {
+        const distanceBefore = intent.distanceFeet
+        const distanceAfter = Math.max(0, distanceBefore - ranged.closeDistancePerRound)
+        setPairDistance(distances, attacker.id, target.id, distanceAfter)
+        const actionEvent: ActionEvent = {
+          eventType: 'action',
+          round: roundNumber,
+          segment: slot.segment,
+          actorId: attacker.id,
+          actorName: attacker.name,
+          actionType: 'close_distance',
+          reason: intent.reason,
+          targetId: target.id,
+          targetName: target.name,
+          distanceBeforeFeet: distanceBefore,
+          distanceAfterFeet: distanceAfter,
+          appliedRules: [
+            {
+              ref: { code: 'HR-2-MOVE-RUN', source: 'harcrendszer', section: '§2' },
+              explanation: `Zárkózás Futva szerint: ${ranged.closeDistancePerRound} láb csökkentés ebben a körben.`,
+            },
+          ],
+        }
+        events.push(actionEvent)
+        spentMovementThisRound.add(attacker.id)
+        continue
+      }
+      if (intent.type === 'invalid') {
+        const actionEvent: ActionEvent = {
+          eventType: 'action',
+          round: roundNumber,
+          segment: slot.segment,
+          actorId: attacker.id,
+          actorName: attacker.name,
+          actionType: 'no_valid_target',
+          reason: intent.reason,
+          targetId: target.id,
+          targetName: target.name,
+          distanceBeforeFeet: intent.distanceFeet ?? undefined,
+          distanceAfterFeet: intent.distanceFeet ?? undefined,
+          appliedRules: [
+            {
+              ref: { code: 'HR-7-RANGED-RANGE', source: 'harcrendszer', section: '§7' },
+              explanation: 'A támadás a hatótávon kívül volt, ezért nem hajtható végre.',
+            },
+          ],
+        }
+        events.push(actionEvent)
+        continue
+      }
 
-      const penalty = outnumberedPenalties[target.id] ?? 0
+      const attackMode: 'melee' | 'ranged' = isRangedWeapon(attacker.weapon) ? 'ranged' : 'melee'
+      const penalty = attackMode === 'melee' ? (outnumberedPenalties[target.id] ?? 0) : 0
       const targetSnap = toSnapshot(target, partyOf.get(target.id)!, injuryStatPenalties)
       const attackerSnap = toSnapshot(attacker, party, injuryStatPenalties)
 
@@ -276,6 +432,7 @@ export const resolveRound = (
         defender: targetSnap,
       })
       const attackerTeModifier = modifier?.attackerTeModifier ?? 0
+      const attackerCeModifier = modifier?.attackerCeModifier ?? 0
       const defenderVeModifier = modifier?.defenderVeModifier ?? 0
       const appliedRules: AppliedRule[] = [...(modifier?.appliedRules ?? [])]
       if (penalty > 0) {
@@ -312,15 +469,29 @@ export const resolveRound = (
         ...attacker,
         ...attackerEffective,
       }
+      // Távolsági támadásnál CÉ ellenőrzéshez a VÉ alapja távolság+50.
+      const effectiveDefense = attackMode === 'ranged'
+        ? (intent.rangedDefenseBase ?? 50) + defenderVeModifier
+        : effectiveVe
+      if (attackMode === 'ranged') {
+        appliedRules.push({
+          ref: { code: 'HR-7-RANGED-DEFENSE', source: 'harcrendszer', section: '§7' },
+          explanation: `Távolsági VÉ alap: távolság + 50 = ${intent.rangedDefenseBase ?? 50}.`,
+        })
+      }
       const event = resolveAttack(
         roundNumber,
         effectiveAttacker,
         target,
-        effectiveVe,
+        effectiveDefense,
         slot.segment,
         roller,
         rules,
         attackerTeModifier,
+        attackerCeModifier,
+        attackMode,
+        intent.distanceFeet ?? undefined,
+        intent.rangedDefenseBase,
         appliedRules,
       )
       events.push(event)

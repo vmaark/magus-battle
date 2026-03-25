@@ -23,6 +23,10 @@ export const ROUND_SEGMENTS = 10
 export type Weapon = {
   name: string
   category: WeaponCategory
+  /** Támadási mód: közelharci vagy távolsági (CÉ-alapú) */
+  attackMode?: 'melee' | 'ranged'
+  /** Maximális hatótáv ynevi lábban (távolsági fegyvernél értelmezett) */
+  rangeFeet?: number
   /** KÉ bónusz a fegyvertől */
   ke: number
   /** TÉ bónusz a fegyvertől */
@@ -138,6 +142,7 @@ export type AttackModifierContext = {
 
 export type AttackModifierResult = {
   attackerTeModifier?: number
+  attackerCeModifier?: number
   defenderVeModifier?: number
   appliedRules?: AppliedRule[]
 }
@@ -151,6 +156,16 @@ export type EncounterOptions = {
   targeting?: TargetingStrategy
   optionalRules?: Partial<OptionalRules>
   ruleHooks?: CombatRuleHooks
+  ranged?: {
+    /** Alapértelmezett távolság ellentétes oldali felek között, ha bármelyik fél távolsági fegyvert használ. */
+    defaultDistanceFeet?: number
+    /** Kezdeti távolság-felülírások párokra. A kulcs formátuma: "attackerId->defenderId". */
+    initialDistances?: Record<string, number>
+    /** Közelharcos zárkózási tempója körönként (ynevi láb). Alap: 39 (Gyorsaság 13, Futva). */
+    closeDistancePerRound?: number
+    /** Mekkora távolságtól tekintjük közelharcnak (ynevi láb). Alap: 5. */
+    meleeReachFeet?: number
+  }
 }
 
 export type InitiativeEntry = {
@@ -165,6 +180,7 @@ export type InitiativeEntry = {
 }
 
 export type AttackEvent = {
+  eventType: 'attack'
   round: number
   segment: number
   attackerId: string
@@ -181,6 +197,10 @@ export type AttackEvent = {
   defenderVe: number
   /** Alaphelyzet TÉ + külső módosítók */
   attackerTeTotal: number
+  /** Alaphelyzet CÉ + külső módosítók (távolsági támadás esetén releváns) */
+  attackerCeTotal: number
+  /** Támadási mód */
+  attackMode: 'melee' | 'ranged'
   hit: boolean
   /** Nincs dobás, automatikus találat (pl. 0 Ép állapotban lévő célpont) */
   automaticHit: boolean
@@ -202,16 +222,37 @@ export type AttackEvent = {
   /** Negatív lehet NJK esetén (overkill) */
   defenderEpAfter: number
   defenderStatusAfter: CombatantStatus
+  /** Távolsági támadásnál a távolság alapján képzett alap VÉ. */
+  rangedDefenseBase?: number
+  /** Támadáskori távolság (ynevi láb), ha ismert. */
+  distanceFeet?: number
   /** Alkalmazott szabályok (strukturált + emberi magyarázat) */
   appliedRules: AppliedRule[]
 }
+
+export type ActionEvent = {
+  eventType: 'action'
+  round: number
+  segment: number
+  actorId: string
+  actorName: string
+  actionType: 'close_distance' | 'no_valid_target'
+  reason?: string
+  targetId?: string
+  targetName?: string
+  distanceBeforeFeet?: number
+  distanceAfterFeet?: number
+  appliedRules: AppliedRule[]
+}
+
+export type CombatEvent = AttackEvent | ActionEvent
 
 export type RoundResult = {
   round: number
   initiatives: InitiativeEntry[]
   /** Túlerő miatti VÉ-levonások, harcos azonosítónként */
   outnumberedPenalties: Record<string, number>
-  events: AttackEvent[]
+  events: CombatEvent[]
   /** Minden harcos állapota a kör végén */
   stateAfter: CombatantSnapshot[]
 }
@@ -220,6 +261,8 @@ export type EncounterState = {
   round: number
   partyA: CombatantSnapshot[]
   partyB: CombatantSnapshot[]
+  /** Dinamikus támadó->védő távolságok kulcsolt térképe (attackerId->defenderId). */
+  distances: Record<string, number>
   isOver: boolean
   winner: 'a' | 'b' | 'draw' | null
 }
@@ -242,5 +285,9 @@ export type Encounter = {
   addCombatant: (party: 'a' | 'b', combatant: Combatant) => void
   /** Az ütközet aktuális állapotának pillanatfelvétele */
   getState: () => EncounterState
+  /** Távolság beállítása két harcos között (id->id, ynevi láb). */
+  setDistance: (attackerId: string, defenderId: string, distanceFeet: number) => void
+  /** Távolság lekérdezése két harcos között; null, ha nincs értelmezett távolság. */
+  getDistance: (attackerId: string, defenderId: string) => number | null
   isOver: () => boolean
 }

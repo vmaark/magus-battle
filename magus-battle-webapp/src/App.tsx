@@ -3,6 +3,7 @@ import { createEncounter, MAGUS_EQUIPMENT_DATA } from 'magus-battle-simulator'
 import type {
   AppliedRule,
   AttackEvent,
+  CombatEvent,
   ArmorRecord,
   Combatant,
   CombatantSnapshot,
@@ -17,7 +18,92 @@ import type { Scenario } from './scenario'
 type RunState = {
   initialA: CombatantSnapshot[]
   initialB: CombatantSnapshot[]
+  initialDistances: Record<string, number>
+  roundDistances: Record<number, Record<string, number>>
   result: EncounterResult
+}
+
+const distanceKey = (attackerId: string, defenderId: string): string => `${attackerId}->${defenderId}`
+
+const getPairDistance = (
+  distances: Record<string, number> | undefined,
+  attackerId: string,
+  defenderId: string,
+): number | null => {
+  if (!distances) return null
+  const direct = distances[distanceKey(attackerId, defenderId)]
+  if (Number.isFinite(direct)) return Math.max(0, Number(direct))
+  const reverse = distances[distanceKey(defenderId, attackerId)]
+  if (Number.isFinite(reverse)) return Math.max(0, Number(reverse))
+  return null
+}
+
+const setPairDistance = (
+  distances: Record<string, number>,
+  attackerId: string,
+  defenderId: string,
+  value: number,
+) => {
+  const normalized = Math.max(0, Math.floor(value))
+  distances[distanceKey(attackerId, defenderId)] = normalized
+  distances[distanceKey(defenderId, attackerId)] = normalized
+}
+
+const buildRoundDistances = (
+  initialDistances: Record<string, number>,
+  rounds: RoundResult[],
+): Record<number, Record<string, number>> => {
+  const current = { ...initialDistances }
+  const byRound: Record<number, Record<string, number>> = {}
+  for (const round of rounds) {
+    for (const event of round.events) {
+      if (
+        event.eventType === 'action' &&
+        event.actionType === 'close_distance' &&
+        event.targetId &&
+        event.distanceAfterFeet !== undefined
+      ) {
+        setPairDistance(current, event.actorId, event.targetId, event.distanceAfterFeet)
+      }
+    }
+    byRound[round.round] = { ...current }
+  }
+  return byRound
+}
+
+const isRangedCombatant = (c: CombatantSnapshot): boolean =>
+  c.weapon.attackMode === 'ranged' || c.weapon.ce > 0
+
+const roundDistancePairs = (
+  combatants: CombatantSnapshot[],
+  distances: Record<string, number> | undefined,
+): Array<{ left: CombatantSnapshot; right: CombatantSnapshot; distanceFeet: number }> => {
+  if (!distances) return []
+  const byId = new Map(combatants.map((c) => [c.id, c]))
+  const seen = new Set<string>()
+  const pairs: Array<{ left: CombatantSnapshot; right: CombatantSnapshot; distanceFeet: number }> = []
+
+  for (const [key, rawDistance] of Object.entries(distances)) {
+    const [leftId, rightId] = key.split('->')
+    if (!leftId || !rightId) continue
+    const left = byId.get(leftId)
+    const right = byId.get(rightId)
+    if (!left || !right) continue
+    if (left.party === right.party) continue
+
+    const pairKey = [leftId, rightId].sort().join('|')
+    if (seen.has(pairKey)) continue
+    seen.add(pairKey)
+
+    const distanceFeet = Math.max(0, Math.floor(rawDistance))
+    const distanceRelevant =
+      distanceFeet > 0 || isRangedCombatant(left) || isRangedCombatant(right)
+    if (!distanceRelevant) continue
+
+    pairs.push({ left, right, distanceFeet })
+  }
+
+  return pairs.sort((a, b) => a.distanceFeet - b.distanceFeet)
 }
 
 const normalizeLookup = (value: string): string =>
@@ -43,6 +129,9 @@ for (const armor of MAGUS_EQUIPMENT_DATA.armors) {
 const armorPresetNames = MAGUS_EQUIPMENT_DATA.armors
   .map((armor) => armor.name)
   .sort((a, b) => a.localeCompare(b, 'hu'))
+
+const toAttackMode = (weapon: WeaponRecord): 'melee' | 'ranged' =>
+  weapon.kind === 'kozelharci' ? 'melee' : 'ranged'
 
 const formatRules = (rules: AppliedRule[]): string =>
   rules.map((r) => `${r.ref.code} (${r.ref.source} ${r.ref.section}): ${r.explanation}`).join('\n')
@@ -110,7 +199,35 @@ const InitiativeList = ({ entries }: { entries: InitiativeEntry[] }) => {
   )
 }
 
-const EventCard = ({ e }: { e: AttackEvent }) => {
+const EventCard = ({ e }: { e: CombatEvent }) => {
+  if (e.eventType === 'action') {
+    const actionLabel =
+      e.actionType === 'close_distance' ? 'Távolság zárkózás' : 'Nincs végrehajtható támadás'
+    return (
+      <div className="event-card">
+        <div className="event-title">
+          {e.actorName}
+          {e.targetName ? ` → ${e.targetName}` : ''}
+        </div>
+        <div className="event-meta">
+          <span>Szegmens: {e.segment}</span>
+          <span className="event-tag miss">{actionLabel}</span>
+        </div>
+        {e.reason && <div className="event-line">{e.reason}</div>}
+        {e.distanceBeforeFeet !== undefined && e.distanceAfterFeet !== undefined && (
+          <div className="event-line">
+            Távolság: {e.distanceBeforeFeet} → {e.distanceAfterFeet} láb
+          </div>
+        )}
+        {e.appliedRules.length > 0 && (
+          <details open>
+            <summary>Alkalmazott szabályok</summary>
+            <pre>{formatRules(e.appliedRules)}</pre>
+          </details>
+        )}
+      </div>
+    )
+  }
   const headline = e.automaticFatal
     ? 'Azonnali halálos találat'
     : e.criticalHit
@@ -142,8 +259,13 @@ const EventCard = ({ e }: { e: AttackEvent }) => {
       <div className="event-line">
         {e.automaticHit
           ? 'Dobás nélkül, automatikus találat.'
-          : `k100 ${e.roll} + TÉ ${e.attackerTeTotal} = ${e.attackTotal} vs VÉ ${e.defenderVe}`}
+          : e.attackMode === 'ranged'
+            ? `k100 ${e.roll} + CÉ ${e.attackerCeTotal} = ${e.attackTotal} vs VÉ ${e.defenderVe} (táv alap: ${e.rangedDefenseBase ?? '-'})`
+            : `k100 ${e.roll} + TÉ ${e.attackerTeTotal} = ${e.attackTotal} vs VÉ ${e.defenderVe}`}
       </div>
+      {e.distanceFeet !== undefined && e.attackMode === 'ranged' && (
+        <div className="event-line event-distance">Távolság: {e.distanceFeet} láb</div>
+      )}
       {e.hit && (
         <div className="event-line">
           Sebzés: nyers {e.rawDamage}, nettó {e.damage}, Fp−{e.fpLoss}, Ép−{e.epLoss}
@@ -159,7 +281,17 @@ const EventCard = ({ e }: { e: AttackEvent }) => {
   )
 }
 
-const PartyTable = ({ title, party }: { title: string; party: CombatantSnapshot[] }) => (
+const PartyTable = ({
+  title,
+  party,
+  allCombatants,
+  distances,
+}: {
+  title: string
+  party: CombatantSnapshot[]
+  allCombatants: CombatantSnapshot[]
+  distances?: Record<string, number>
+}) => (
   <div className="panel">
     <h3>{title}</h3>
     <div className="table-scroll">
@@ -180,7 +312,23 @@ const PartyTable = ({ title, party }: { title: string; party: CombatantSnapshot[
           </tr>
         </thead>
         <tbody>
-          {party.map((c) => (
+          {party.map((c) => {
+            const target = c.targetId
+              ? allCombatants.find((candidate) => candidate.id === c.targetId)
+              : undefined
+            const distanceFeet = c.targetId ? getPairDistance(distances, c.id, c.targetId) : null
+            const distanceRelevant =
+              distanceFeet !== null &&
+              (distanceFeet > 0 || isRangedCombatant(c) || (target ? isRangedCombatant(target) : false))
+            const distanceClass =
+              distanceFeet === null
+                ? ''
+                : distanceFeet <= 5
+                  ? 'near'
+                  : distanceFeet <= 30
+                    ? 'mid'
+                    : 'far'
+            return (
             <tr key={c.id}>
               <td>
                 <span className={`party-badge ${c.party}`}>[{partyName(c.party)}]</span>
@@ -205,9 +353,20 @@ const PartyTable = ({ title, party }: { title: string; party: CombatantSnapshot[
               <td>{c.te}</td>
               <td>{c.ve}</td>
               <td>{c.ce}</td>
-              <td>{c.targetId ?? '—'}</td>
+              <td>
+                {c.targetId ? (
+                  <div className="target-cell">
+                    <div className="target-name">{target?.name ?? c.targetId}</div>
+                    {distanceRelevant && (
+                      <span className={`distance-badge ${distanceClass}`}>{distanceFeet} láb</span>
+                    )}
+                  </div>
+                ) : (
+                  '—'
+                )}
+              </td>
             </tr>
-          ))}
+          )})}
         </tbody>
       </table>
     </div>
@@ -234,6 +393,8 @@ const createEmptyCombatant = (partyPrefix: 'a' | 'b', idx: number): Combatant =>
   weapon: {
     name: 'Fegyver',
     category: 3,
+    attackMode: 'melee',
+    rangeFeet: 0,
     ke: 0,
     te: 0,
     ve: 0,
@@ -261,6 +422,8 @@ const getInitialScenario = (): Scenario => {
         maxRounds: 100,
         mandatoryEpFromFp: true,
         injuryStatPenalties: true,
+        defaultDistanceFeet: 0,
+        closeDistancePerRound: 39,
       },
     }
   }
@@ -464,6 +627,8 @@ const FighterEditor = ({
                           ...p.weapon,
                           name: preset.name,
                           category: preset.category ?? p.weapon.category,
+                          attackMode: toAttackMode(preset),
+                          rangeFeet: preset.rangeFeet ?? p.weapon.rangeFeet ?? 0,
                           damage: preset.damage,
                           ke: preset.ke ?? p.weapon.ke,
                           te: preset.te ?? p.weapon.te,
@@ -509,6 +674,35 @@ const FighterEditor = ({
               <option value="4">4</option>
               <option value="5">5</option>
             </select>
+          </label>
+          <label className="mini-field">
+            Típus
+            <select
+              value={c.weapon.attackMode ?? (c.weapon.ce > 0 ? 'ranged' : 'melee')}
+              onChange={(e) =>
+                onUpdate(team, idx, (p) => ({
+                  ...p,
+                  weapon: { ...p.weapon, attackMode: e.target.value as 'melee' | 'ranged' },
+                }))
+              }
+            >
+              <option value="melee">Közelharci</option>
+              <option value="ranged">Távolsági</option>
+            </select>
+          </label>
+          <label className="mini-field">
+            Hatótáv (láb)
+            <input
+              type="number"
+              min={0}
+              value={c.weapon.rangeFeet ?? 0}
+              onChange={(e) =>
+                onUpdate(team, idx, (p) => ({
+                  ...p,
+                  weapon: { ...p.weapon, rangeFeet: Number(e.target.value) },
+                }))
+              }
+            />
           </label>
         </div>
         <div className="fighter-grid stats-inline weapon-stats">
@@ -683,6 +877,12 @@ export default function App() {
     initialScenario.settings?.injuryStatPenalties ?? true,
   )
   const [maxRounds, setMaxRounds] = useState(100)
+  const [defaultDistanceFeet, setDefaultDistanceFeet] = useState(
+    initialScenario.settings?.defaultDistanceFeet ?? 0,
+  )
+  const [closeDistancePerRound, setCloseDistancePerRound] = useState(
+    initialScenario.settings?.closeDistancePerRound ?? 39,
+  )
   const [diceQueueInput, setDiceQueueInput] = useState('')
   const [interactiveMode, setInteractiveMode] = useState(false)
   const [roundCursor, setRoundCursor] = useState(1)
@@ -727,6 +927,8 @@ export default function App() {
       maxRounds,
       mandatoryEpFromFp,
       injuryStatPenalties,
+      defaultDistanceFeet,
+      closeDistancePerRound,
     },
   })
 
@@ -755,6 +957,8 @@ export default function App() {
       setRunState({
         initialA: initial.partyA,
         initialB: initial.partyB,
+        initialDistances: initial.distances,
+        roundDistances: buildRoundDistances(initial.distances, result.rounds),
         result,
       })
       setRoundCursor(1)
@@ -815,6 +1019,28 @@ export default function App() {
                     onChange={(e) => setInjuryStatPenalties(e.target.checked)}
                   />
                   Sérülési harcérték-módosítók (Ép/Fp veszteség alapján)
+                </div>
+                <div className="inline-setting">
+                  <label>
+                    Kezdő távolság (láb)
+                    <input
+                      type="number"
+                      min={0}
+                      value={defaultDistanceFeet}
+                      onChange={(e) => setDefaultDistanceFeet(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+                <div className="inline-setting">
+                  <label>
+                    Zárkózás/kör (láb)
+                    <input
+                      type="number"
+                      min={0}
+                      value={closeDistancePerRound}
+                      onChange={(e) => setCloseDistancePerRound(Number(e.target.value))}
+                    />
+                  </label>
                 </div>
               </label>
             </div>
@@ -886,8 +1112,18 @@ export default function App() {
       {runState && (
         <>
           <section className="grid">
-            <PartyTable title="A csapat (kezdő állapot)" party={runState.initialA} />
-            <PartyTable title="B csapat (kezdő állapot)" party={runState.initialB} />
+            <PartyTable
+              title="A csapat (kezdő állapot)"
+              party={runState.initialA}
+              allCombatants={[...runState.initialA, ...runState.initialB]}
+              distances={runState.initialDistances}
+            />
+            <PartyTable
+              title="B csapat (kezdő állapot)"
+              party={runState.initialB}
+              allCombatants={[...runState.initialA, ...runState.initialB]}
+              distances={runState.initialDistances}
+            />
           </section>
 
           <section className="panel">
@@ -905,6 +1141,14 @@ export default function App() {
             <section className="panel" key={round.round}>
               <h2>{round.round}. kör</h2>
               <InitiativeList entries={round.initiatives} />
+              {roundDistancePairs(round.stateAfter, runState.roundDistances[round.round]).length > 0 && (
+                <div className="round-subtitle">
+                  Távolságok:{' '}
+                  {roundDistancePairs(round.stateAfter, runState.roundDistances[round.round])
+                    .map(({ left, right, distanceFeet }) => `${left.name} ↔ ${right.name}: ${distanceFeet} láb`)
+                    .join(', ')}
+                </div>
+              )}
               {Object.values(round.outnumberedPenalties).some((v) => v > 0) && (
                 <div className="round-subtitle">
                   Túlerő VÉ-levonás:{' '}
@@ -922,7 +1166,7 @@ export default function App() {
                   list.push(e)
                   map.set(e.segment, list)
                   return map
-                }, new Map<number, AttackEvent[]>()),
+                }, new Map<number, CombatEvent[]>()),
               )
                 .sort((a, b) => a[0] - b[0])
                 .map(([segment, events]) => (
@@ -937,8 +1181,18 @@ export default function App() {
                 ))}
 
               <div className="grid">
-                <PartyTable title="A csapat kör végi állapot" party={splitByParty(round.stateAfter).a} />
-                <PartyTable title="B csapat kör végi állapot" party={splitByParty(round.stateAfter).b} />
+                <PartyTable
+                  title="A csapat kör végi állapot"
+                  party={splitByParty(round.stateAfter).a}
+                  allCombatants={round.stateAfter}
+                  distances={runState.roundDistances[round.round]}
+                />
+                <PartyTable
+                  title="B csapat kör végi állapot"
+                  party={splitByParty(round.stateAfter).b}
+                  allCombatants={round.stateAfter}
+                  distances={runState.roundDistances[round.round]}
+                />
               </div>
             </section>
           ))}

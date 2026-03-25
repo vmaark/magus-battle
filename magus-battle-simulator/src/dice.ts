@@ -23,3 +23,34 @@ export const rollDamage = (expression: string, roller: DiceRoller): number => {
   for (let i = 0; i < count; i++) total += roller(sides)
   return Math.max(1, total + bonus)
 }
+
+/**
+ * Íjász szabály (harcrendszer.md §7):
+ * ha egy sebzéskocka maximumot dob, ugyanazzal a kockával újra dobunk,
+ * és addig ismételjük, amíg maximumot ad.
+ */
+export const rollDamageWithArcherRule = (
+  expression: string,
+  roller: DiceRoller,
+): { total: number; triggered: boolean } => {
+  const match = expression.match(/^(\d*)k(\d+)([+-]\d+)?$/i)
+  if (!match) throw new Error(`Érvénytelen sebzéskifejezés: "${expression}"`)
+
+  const count = parseInt(match[1] || '1', 10)
+  const sides = parseInt(match[2], 10)
+  const bonus = match[3] ? parseInt(match[3], 10) : 0
+
+  let total = 0
+  let triggered = false
+  for (let i = 0; i < count; i++) {
+    let roll = roller(sides)
+    total += roll
+    while (roll === sides) {
+      triggered = true
+      roll = roller(sides)
+      total += roll
+    }
+  }
+
+  return { total: Math.max(1, total + bonus), triggered }
+}

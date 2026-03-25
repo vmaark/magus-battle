@@ -18,6 +18,12 @@ import { getEffectiveCombatValues } from './stat-modifiers'
 
 const DEFAULT_RULES: OptionalRules = { mandatoryEpFromFp: true, injuryStatPenalties: true }
 const DEFAULT_MAX_ROUNDS = 100
+const DEFAULT_CLOSE_DISTANCE_PER_ROUND = 39 // Gyorsaság 13, Futva (HR §2)
+const DEFAULT_MELEE_REACH_FEET = 5
+
+const distanceKey = (attackerId: string, defenderId: string): string => `${attackerId}->${defenderId}`
+const isRangedWeapon = (weapon: Combatant['weapon']): boolean =>
+  weapon.attackMode === 'ranged' || weapon.ce > 0
 
 export const createEncounter = (
   partyA: Combatant[],
@@ -28,9 +34,16 @@ export const createEncounter = (
   const targeting: TargetingStrategy = options.targeting ?? 'random'
   const rules: OptionalRules = { ...DEFAULT_RULES, ...options.optionalRules }
   const ruleHooks = options.ruleHooks
+  const closeDistancePerRound = Math.max(
+    0,
+    options.ranged?.closeDistancePerRound ?? DEFAULT_CLOSE_DISTANCE_PER_ROUND,
+  )
+  const meleeReachFeet = Math.max(0, options.ranged?.meleeReachFeet ?? DEFAULT_MELEE_REACH_FEET)
+  const defaultDistanceFeet = Math.max(0, options.ranged?.defaultDistanceFeet ?? 0)
 
   const combatants = new Map<string, Combatant>()
   const partyOf = new Map<string, 'a' | 'b'>()
+  const distances: Record<string, number> = {}
 
   for (const c of partyA) {
     combatants.set(c.id, { ...c })
@@ -39,6 +52,23 @@ export const createEncounter = (
   for (const c of partyB) {
     combatants.set(c.id, { ...c })
     partyOf.set(c.id, 'b')
+  }
+
+  // Kezdeti távolságok: ha bármelyik fél távolsági fegyvert használ, kapjanak alap távolságot.
+  const allCombatants = [...partyA, ...partyB]
+  for (const attacker of allCombatants) {
+    for (const defender of allCombatants) {
+      if (attacker.id === defender.id) continue
+      if (partyOf.get(attacker.id) === partyOf.get(defender.id)) continue
+      if (isRangedWeapon(attacker.weapon) || isRangedWeapon(defender.weapon)) {
+        distances[distanceKey(attacker.id, defender.id)] = defaultDistanceFeet
+      } else {
+        distances[distanceKey(attacker.id, defender.id)] = 0
+      }
+    }
+  }
+  for (const [key, value] of Object.entries(options.ranged?.initialDistances ?? {})) {
+    distances[key] = Math.max(0, Math.floor(value))
   }
 
   let currentRound = 0
@@ -93,6 +123,7 @@ export const createEncounter = (
       round: currentRound,
       partyA: snap('a'),
       partyB: snap('b'),
+      distances: { ...distances },
       isOver: isOverFn(),
       winner: getWinner(),
     }
@@ -109,12 +140,16 @@ export const createEncounter = (
       roller,
       targeting,
       rules,
+      distances,
+      { closeDistancePerRound, meleeReachFeet },
       ruleHooks,
     )
     // Nyilvántartás a következő kör kezdeményező-levonásához
-    hadEpDamageLastRound = new Set(
-      result.events.filter(e => e.epLoss > 0).map(e => e.defenderId),
-    )
+    const injuredThisRound: string[] = []
+    for (const event of result.events) {
+      if (event.eventType === 'attack' && event.epLoss > 0) injuredThisRound.push(event.defenderId)
+    }
+    hadEpDamageLastRound = new Set(injuredThisRound)
     return result
   }
 
@@ -138,11 +173,39 @@ export const createEncounter = (
     combatants.delete(id)
     partyOf.delete(id)
     hadEpDamageLastRound.delete(id)
+    for (const key of Object.keys(distances)) {
+      if (key.startsWith(`${id}->`) || key.endsWith(`->${id}`)) delete distances[key]
+    }
   }
 
   const addCombatant = (party: 'a' | 'b', combatant: Combatant): void => {
     combatants.set(combatant.id, { ...combatant })
     partyOf.set(combatant.id, party)
+    for (const other of combatants.values()) {
+      if (other.id === combatant.id) continue
+      if (partyOf.get(other.id) === party) continue
+      const baseDistance =
+        isRangedWeapon(combatant.weapon) || isRangedWeapon(other.weapon) ? defaultDistanceFeet : 0
+      distances[distanceKey(combatant.id, other.id)] = baseDistance
+      distances[distanceKey(other.id, combatant.id)] = baseDistance
+    }
+  }
+
+  const setDistance = (attackerId: string, defenderId: string, distanceFeet: number): void => {
+    if (!combatants.has(attackerId)) throw new Error(`Harcos "${attackerId}" nem található.`)
+    if (!combatants.has(defenderId)) throw new Error(`Harcos "${defenderId}" nem található.`)
+    if (partyOf.get(attackerId) === partyOf.get(defenderId)) {
+      throw new Error('Távolság csak ellentétes oldali harcosok között értelmezett.')
+    }
+    const normalized = Math.max(0, Math.floor(distanceFeet))
+    distances[distanceKey(attackerId, defenderId)] = normalized
+    distances[distanceKey(defenderId, attackerId)] = normalized
+  }
+
+  const getDistance = (attackerId: string, defenderId: string): number | null => {
+    const d = distances[distanceKey(attackerId, defenderId)]
+    if (!Number.isFinite(d)) return null
+    return Math.max(0, Number(d))
   }
 
   return {
@@ -152,6 +215,8 @@ export const createEncounter = (
     removeCombatant,
     addCombatant,
     getState: getStateFn,
+    setDistance,
+    getDistance,
     isOver: isOverFn,
   }
 }

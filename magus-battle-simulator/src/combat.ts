@@ -11,7 +11,7 @@ import type {
   OptionalRules,
   AppliedRule,
 } from './types'
-import { rollK100, rollDamage } from './dice'
+import { rollK100, rollDamage, rollDamageWithArcherRule } from './dice'
 
 const OVERTHIT_THRESHOLD = 50
 
@@ -38,6 +38,10 @@ export const resolveAttack = (
   roller: DiceRoller,
   rules: OptionalRules,
   attackerTeModifier = 0,
+  attackerCeModifier = 0,
+  attackMode: 'melee' | 'ranged' = 'melee',
+  distanceFeet?: number,
+  rangedDefenseBase?: number,
   externalRules: AppliedRule[] = [],
 ): AttackEvent => {
   const appliedRules: AppliedRule[] = [...externalRules]
@@ -51,6 +55,7 @@ export const resolveAttack = (
     const epLoss = 1
     const fpLoss = defender.fp
     return {
+      eventType: 'attack',
       round,
       segment,
       attackerId: attacker.id,
@@ -61,6 +66,8 @@ export const resolveAttack = (
       roll: 0,
       attackTotal: attacker.te + attackerTeModifier,
       attackerTeTotal: attacker.te + attackerTeModifier,
+      attackerCeTotal: attacker.ce + attackerCeModifier,
+      attackMode,
       defenderVe: effectiveVe,
       hit: true,
       automaticHit: true,
@@ -75,6 +82,8 @@ export const resolveAttack = (
       defenderFpAfter: 0,
       defenderEpAfter: defender.ep - epLoss,
       defenderStatusAfter: 'dead',
+      rangedDefenseBase,
+      distanceFeet,
       appliedRules,
     }
   }
@@ -83,7 +92,9 @@ export const resolveAttack = (
   const criticalHit = roll === 100
   const criticalMiss = roll === 1
   const attackerTeTotal = attacker.te + attackerTeModifier
-  const attackTotal = roll + attackerTeTotal
+  const attackerCeTotal = attacker.ce + attackerCeModifier
+  const offenseTotal = attackMode === 'ranged' ? attackerCeTotal : attackerTeTotal
+  const attackTotal = roll + offenseTotal
   const hit = criticalHit || (!criticalMiss && attackTotal >= effectiveVe)
 
   if (attackerTeModifier !== 0) {
@@ -92,8 +103,15 @@ export const resolveAttack = (
       explanation: `Harci helyzetmódosító alkalmazva: támadó TÉ ${attackerTeModifier >= 0 ? '+' : ''}${attackerTeModifier}.`,
     })
   }
+  if (attackerCeModifier !== 0) {
+    appliedRules.push({
+      ref: { code: 'HR-10-COMBAT-MOD', source: 'harcrendszer', section: '§10' },
+      explanation: `Harci helyzetmódosító alkalmazva: támadó CÉ ${attackerCeModifier >= 0 ? '+' : ''}${attackerCeModifier}.`,
+    })
+  }
 
   const missResult: AttackEvent = {
+    eventType: 'attack',
     round,
     segment,
     attackerId: attacker.id,
@@ -104,6 +122,8 @@ export const resolveAttack = (
     roll,
     attackTotal,
     attackerTeTotal,
+    attackerCeTotal,
+    attackMode,
     defenderVe: effectiveVe,
     hit: false,
     automaticHit: false,
@@ -118,6 +138,8 @@ export const resolveAttack = (
     defenderFpAfter: defender.fp,
     defenderEpAfter: defender.ep,
     defenderStatusAfter: defender.status,
+    rangedDefenseBase,
+    distanceFeet,
     appliedRules,
   }
 
@@ -130,7 +152,18 @@ export const resolveAttack = (
   if (!hit) return missResult
 
   const overthit = attackTotal >= effectiveVe + OVERTHIT_THRESHOLD
-  const rawDamage = rollDamage(attacker.weapon.damage, roller)
+  const rangedArcherRule = attackMode === 'ranged'
+  const archerDetail = rangedArcherRule
+    ? rollDamageWithArcherRule(attacker.weapon.damage, roller)
+    : null
+  const rawDamage = archerDetail ? archerDetail.total : rollDamage(attacker.weapon.damage, roller)
+  if (archerDetail?.triggered) {
+    appliedRules.push({
+      ref: { code: 'HR-7-ARCHER-RULE', source: 'harcrendszer', section: '§7' },
+      explanation:
+        'Íjász szabály: maximumot dobó sebzéskockára újradobás történt, és az eredmények összeadódtak.',
+    })
+  }
   const sfe = criticalHit ? 0 : defender.armor.sfe           // 00-nál SFÉ nem érvényesül
   const effectiveDamage = Math.max(0, rawDamage - sfe)
   const bonusEp = criticalHit ? 3 : 0                        // 00-as szabály: +3 Ép
@@ -204,6 +237,7 @@ export const resolveAttack = (
   const newEp = defender.ep - epLoss   // NJK-nál lehet negatív
 
   return {
+    eventType: 'attack',
     round,
     segment,
     attackerId: attacker.id,
@@ -214,6 +248,8 @@ export const resolveAttack = (
     roll,
     attackTotal,
     attackerTeTotal,
+    attackerCeTotal,
+    attackMode,
     defenderVe: effectiveVe,
     hit: true,
     automaticHit: false,
@@ -228,6 +264,8 @@ export const resolveAttack = (
     defenderFpAfter: newFp,
     defenderEpAfter: newEp,
     defenderStatusAfter: deriveStatus(newEp, newFp),
+    rangedDefenseBase,
+    distanceFeet,
     appliedRules,
   }
 }

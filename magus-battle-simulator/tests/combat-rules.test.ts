@@ -1,5 +1,5 @@
 import { createEncounter, resolveAttack } from '../src'
-import type { Combatant, DiceRoller } from '../src'
+import type { AttackEvent, Combatant, DiceRoller } from '../src'
 
 const makeCombatant = (overrides: Partial<Combatant>): Combatant => ({
   id: 'c',
@@ -26,6 +26,9 @@ const queueRoller = (values: number[]): DiceRoller => {
     return values[idx++]
   }
 }
+
+const attackEventsOf = (events: Array<{ eventType: string }>): AttackEvent[] =>
+  events.filter((e): e is AttackEvent => e.eventType === 'attack')
 
 describe('combat rules parity', () => {
   test('SFÉ teljesen felfoghatja a sebzést (0 nettó sebzés)', () => {
@@ -90,7 +93,7 @@ describe('combat rules parity', () => {
     const encounter = createEncounter([a], [b], { roller, targeting: 'random' })
     const round = encounter.nextRound()
 
-    expect(round.events).toHaveLength(2)
+    expect(attackEventsOf(round.events)).toHaveLength(2)
     expect(round.stateAfter.every(s => s.status !== 'active')).toBe(true)
   })
 
@@ -144,7 +147,7 @@ describe('combat rules parity', () => {
       },
     })
     const round = encounter.nextRound()
-    const event = round.events[0]
+    const event = attackEventsOf(round.events)[0]
 
     expect(event.hit).toBe(true)
     expect(event.attackerTeTotal).toBe(80)
@@ -175,7 +178,7 @@ describe('combat rules parity', () => {
       targeting: 'random',
     })
     const round = encounter.nextRound()
-    const event = round.events.find((e) => e.attackerId === 'a')
+    const event = attackEventsOf(round.events).find((e) => e.attackerId === 'a')
     const attackerAfter = round.stateAfter.find((s) => s.id === 'a')
 
     expect(event).toBeDefined()
@@ -238,5 +241,184 @@ describe('combat rules parity', () => {
     expect(attacker.te).toBe(40)
     expect(attacker.ve).toBe(45)
     expect(attacker.ce).toBe(10)
+  })
+
+  test('távoli távolsági célpontot a közelharcos csak zárkózással tud elérni', () => {
+    const melee = makeCombatant({
+      id: 'a',
+      name: 'Kardforgató',
+      weapon: { name: 'Kard', category: 3, attackMode: 'melee', rangeFeet: 0, ke: 0, te: 0, ve: 0, ce: 0, damage: '1k1' },
+    })
+    const ranged = makeCombatant({
+      id: 'b',
+      name: 'Íjász',
+      ce: 80,
+      weapon: { name: 'Hosszú íj', category: 2, attackMode: 'ranged', rangeFeet: 150, ke: 0, te: 0, ve: 0, ce: 10, damage: '1k1' },
+    })
+
+    const encounter = createEncounter([melee], [ranged], {
+      roller: queueRoller(Array(30).fill(5)),
+      targeting: 'random',
+      ranged: { defaultDistanceFeet: 100, closeDistancePerRound: 39 },
+    })
+    const round = encounter.nextRound()
+    const closeEvent = round.events.find(
+      (e) => e.eventType === 'action' && e.actionType === 'close_distance' && e.actorId === 'a',
+    )
+    const rangedAttack = attackEventsOf(round.events).find((e) => e.attackerId === 'b')
+
+    expect(closeEvent).toBeDefined()
+    expect(rangedAttack).toBeDefined()
+  })
+
+  test('közelharcos több körön át zárkózik, amíg közelharci távolságba nem ér', () => {
+    const melee = makeCombatant({
+      id: 'a',
+      name: 'Kardforgató',
+      weapon: { name: 'Kard', category: 3, attackMode: 'melee', rangeFeet: 0, ke: 0, te: 0, ve: 0, ce: 0, damage: '1k1' },
+    })
+    const ranged = makeCombatant({
+      id: 'b',
+      name: 'Íjász',
+      ce: 70,
+      weapon: { name: 'Hosszú íj', category: 4, attackMode: 'ranged', rangeFeet: 150, ke: 0, te: 0, ve: 0, ce: 8, damage: '1k1' },
+    })
+    const encounter = createEncounter([melee], [ranged], {
+      roller: queueRoller(Array(90).fill(5)),
+      targeting: 'random',
+      ranged: { defaultDistanceFeet: 80, closeDistancePerRound: 39 },
+    })
+
+    const r1 = encounter.nextRound()
+    const r2 = encounter.nextRound()
+    expect(attackEventsOf(r1.events).some((e) => e.attackerId === 'a')).toBe(false)
+    expect(attackEventsOf(r2.events).some((e) => e.attackerId === 'a')).toBe(false)
+    expect(encounter.getDistance('a', 'b')).toBeLessThanOrEqual(5)
+  })
+
+  test('távolsági vs távolsági felek távolból is tudnak támadni', () => {
+    const a = makeCombatant({
+      id: 'a',
+      name: 'A íjász',
+      ce: 80,
+      weapon: { name: 'Hosszú íj', category: 2, attackMode: 'ranged', rangeFeet: 150, ke: 0, te: 0, ve: 0, ce: 8, damage: '1k1' },
+    })
+    const b = makeCombatant({
+      id: 'b',
+      name: 'B íjász',
+      ce: 80,
+      weapon: { name: 'Hosszú íj', category: 2, attackMode: 'ranged', rangeFeet: 150, ke: 0, te: 0, ve: 0, ce: 8, damage: '1k1' },
+    })
+    const encounter = createEncounter([a], [b], {
+      roller: queueRoller(Array(40).fill(5)),
+      targeting: 'random',
+      ranged: { defaultDistanceFeet: 120, closeDistancePerRound: 39 },
+    })
+
+    const round = encounter.nextRound()
+    const attacks = attackEventsOf(round.events)
+    expect(attacks.some((e) => e.attackerId === 'a')).toBe(true)
+    expect(attacks.some((e) => e.attackerId === 'b')).toBe(true)
+    expect(attacks.every((e) => e.attackMode === 'ranged')).toBe(true)
+  })
+
+  test('hatótávon kívüli távolsági harcos zárkózik ahelyett, hogy tétlen lenne', () => {
+    const a = makeCombatant({
+      id: 'a',
+      name: 'A íjász',
+      ce: 80,
+      weapon: { name: 'Rövid íj', category: 2, attackMode: 'ranged', rangeFeet: 50, ke: 0, te: 0, ve: 0, ce: 8, damage: '1k1' },
+    })
+    const b = makeCombatant({
+      id: 'b',
+      name: 'B íjász',
+      ce: 80,
+      weapon: { name: 'Rövid íj', category: 2, attackMode: 'ranged', rangeFeet: 50, ke: 0, te: 0, ve: 0, ce: 8, damage: '1k1' },
+    })
+    const encounter = createEncounter([a], [b], {
+      roller: queueRoller(Array(40).fill(5)),
+      targeting: 'random',
+      ranged: { defaultDistanceFeet: 120, closeDistancePerRound: 39 },
+    })
+
+    const round = encounter.nextRound()
+    const closeEvents = round.events.filter(
+      (e) => e.eventType === 'action' && e.actionType === 'close_distance',
+    )
+    const attacks = attackEventsOf(round.events)
+
+    expect(closeEvents.length).toBeGreaterThan(0)
+    expect(attacks.length).toBe(0)
+    expect(encounter.getDistance('a', 'b')).toBe(81)
+  })
+
+  test('távolság API frissítés azonnal befolyásolja a támadás jogosságát', () => {
+    const melee = makeCombatant({
+      id: 'a',
+      name: 'Kardforgató',
+      weapon: { name: 'Kard', category: 3, attackMode: 'melee', rangeFeet: 0, ke: 0, te: 0, ve: 0, ce: 0, damage: '1k1' },
+    })
+    const ranged = makeCombatant({
+      id: 'b',
+      name: 'Íjász',
+      ce: 60,
+      weapon: { name: 'Hosszú íj', category: 2, attackMode: 'ranged', rangeFeet: 150, ke: 0, te: 0, ve: 0, ce: 8, damage: '1k1' },
+    })
+    const encounter = createEncounter([melee], [ranged], {
+      roller: queueRoller(Array(40).fill(5)),
+      targeting: 'random',
+      ranged: { defaultDistanceFeet: 90, closeDistancePerRound: 39 },
+    })
+
+    expect(encounter.getDistance('a', 'b')).toBe(90)
+    encounter.setDistance('a', 'b', 0)
+    const round = encounter.nextRound()
+
+    expect(attackEventsOf(round.events).some((e) => e.attackerId === 'a')).toBe(true)
+  })
+
+  test('íjász szabály: távolsági sebzéskocka maximuma újradobódik és összeadódik', () => {
+    const attacker = makeCombatant({
+      id: 'a',
+      ce: 100,
+      weapon: {
+        name: 'Rövid íj',
+        category: 2,
+        attackMode: 'ranged',
+        rangeFeet: 100,
+        ke: 0,
+        te: 0,
+        ve: 0,
+        ce: 8,
+        damage: '1k6',
+      },
+    })
+    const defender = makeCombatant({
+      id: 'd',
+      te: 0,
+      ve: 10,
+      armor: { name: 'Nincs', mgt: 0, sfe: 0 },
+      fp: 30,
+      ep: 10,
+    })
+    // támadó dobás: 50; sebzés: 6 (max) -> 6 (max) -> 4
+    const event = resolveAttack(
+      1,
+      attacker,
+      defender,
+      60,
+      5,
+      queueRoller([50, 6, 6, 4]),
+      { mandatoryEpFromFp: true, injuryStatPenalties: true },
+      0,
+      0,
+      'ranged',
+      50,
+      100,
+    )
+
+    expect(event.hit).toBe(true)
+    expect(event.rawDamage).toBe(16)
+    expect(event.appliedRules.some((r) => r.ref.code === 'HR-7-ARCHER-RULE')).toBe(true)
   })
 })

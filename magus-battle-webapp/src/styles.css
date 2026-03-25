@@ -452,6 +452,40 @@ td {
   color: var(--danger);
 }
 
+.target-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.target-name {
+  font-weight: 600;
+}
+
+.distance-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.distance-badge.near {
+  background: rgba(125, 255, 60, 0.16);
+  color: var(--accent);
+}
+
+.distance-badge.mid {
+  background: rgba(255, 213, 77, 0.16);
+  color: var(--warn);
+}
+
+.distance-badge.far {
+  background: rgba(142, 201, 255, 0.16);
+  color: #8ec9ff;
+}
+
 .hp-wrap {
   min-width: 0;
   max-width: 100%;
@@ -558,6 +592,11 @@ td {
 .event-line {
   font-size: 14px;
   margin-bottom: 4px;
+}
+
+.event-line.event-distance {
+  color: #8ec9ff;
+  font-weight: 600;
 }
 
 details summary {

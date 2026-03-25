@@ -16,6 +16,10 @@ export type Scenario = {
     mandatoryEpFromFp?: boolean
     /** Sérülési harcérték-módosítók (eletero.md §5) — alapértelmezés: true */
     injuryStatPenalties?: boolean
+    /** Kezdeti távolság lábban távolsági konfliktusokhoz */
+    defaultDistanceFeet?: number
+    /** Közelharci zárkózás mértéke körönként lábban */
+    closeDistancePerRound?: number
   }
 }
 
@@ -53,6 +57,10 @@ export const parseScenario = (raw: unknown): ParsedScenario => {
       optionalRules: {
         mandatoryEpFromFp: s.settings?.mandatoryEpFromFp ?? true,
         injuryStatPenalties: s.settings?.injuryStatPenalties ?? true,
+      },
+      ranged: {
+        defaultDistanceFeet: s.settings?.defaultDistanceFeet ?? 0,
+        closeDistancePerRound: s.settings?.closeDistancePerRound ?? 39,
       },
     },
     maxRounds: s.settings?.maxRounds ?? 100,

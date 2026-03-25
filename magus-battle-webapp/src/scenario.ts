@@ -8,6 +8,8 @@ export type Scenario = {
     maxRounds?: number
     mandatoryEpFromFp?: boolean
     injuryStatPenalties?: boolean
+    defaultDistanceFeet?: number
+    closeDistancePerRound?: number
   }
 }
 
@@ -47,6 +49,10 @@ export const parseScenario = (raw: unknown): ParsedScenario => {
         mandatoryEpFromFp: s.settings?.mandatoryEpFromFp ?? true,
         injuryStatPenalties: s.settings?.injuryStatPenalties ?? true,
       },
+      ranged: {
+        defaultDistanceFeet: s.settings?.defaultDistanceFeet ?? 0,
+        closeDistancePerRound: s.settings?.closeDistancePerRound ?? 39,
+      },
     },
     maxRounds: s.settings?.maxRounds ?? 100,
   }
@@ -68,6 +74,7 @@ export const DEFAULT_SCENARIO = `{
       "weapon": {
         "name": "Hosszu kard",
         "category": 3,
+        "attackMode": "melee",
         "ke": 5,
         "te": 10,
         "ve": 10,
@@ -92,6 +99,8 @@ export const DEFAULT_SCENARIO = `{
       "weapon": {
         "name": "Hosszu ij",
         "category": 2,
+        "attackMode": "ranged",
+        "rangeFeet": 150,
         "ke": 4,
         "te": 0,
         "ve": 0,
@@ -118,6 +127,7 @@ export const DEFAULT_SCENARIO = `{
       "weapon": {
         "name": "Furkosbot",
         "category": 4,
+        "attackMode": "melee",
         "ke": 5,
         "te": 10,
         "ve": 10,
@@ -142,6 +152,7 @@ export const DEFAULT_SCENARIO = `{
       "weapon": {
         "name": "Egykezes csatabard",
         "category": 4,
+        "attackMode": "melee",
         "ke": 3,
         "te": 10,
         "ve": 5,
@@ -167,6 +178,8 @@ export const DEFAULT_SCENARIO = `{
       "weapon": {
         "name": "Rovid ij",
         "category": 2,
+        "attackMode": "ranged",
+        "rangeFeet": 50,
         "ke": 5,
         "te": 0,
         "ve": 0,
@@ -182,7 +195,9 @@ export const DEFAULT_SCENARIO = `{
     "targeting": "random",
     "maxRounds": 50,
     "mandatoryEpFromFp": true,
-    "injuryStatPenalties": true
+    "injuryStatPenalties": true,
+    "defaultDistanceFeet": 90,
+    "closeDistancePerRound": 39
   }
 }
 `
