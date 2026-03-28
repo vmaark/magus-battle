@@ -1,13 +1,19 @@
 import { useMemo, useRef, useState } from 'react'
-import { createEncounter, MAGUS_EQUIPMENT_DATA } from 'magus-battle-simulator'
+import {
+  createEncounter,
+  createDeclaredCombatRuleHooks,
+  DECLARED_COMBAT_RULE_OPTIONS,
+  MAGUS_EQUIPMENT_DATA,
+} from 'magus-battle-simulator'
 import type {
   AppliedRule,
   AttackEvent,
-  AttackMode,
   CombatEvent,
   ArmorRecord,
   Combatant,
   CombatantSnapshot,
+  DeclaredCombatRule,
+  DeclaredCombatRuleId,
   DistanceKey,
   DistanceMap,
   EncounterResult,
@@ -111,6 +117,32 @@ const roundDistancePairs = (
   return pairs.sort((a, b) => a.distanceFeet - b.distanceFeet)
 }
 
+const roundTargetAssignments = (
+  combatants: CombatantSnapshot[],
+): Array<{ attacker: CombatantSnapshot; target: CombatantSnapshot | null }> => {
+  const byId = new Map(combatants.map((c) => [c.id, c]))
+  return combatants
+    .filter((c) => c.targetId)
+    .map((attacker) => ({
+      attacker,
+      target: attacker.targetId ? byId.get(attacker.targetId) ?? null : null,
+    }))
+}
+
+const getRoundEffectiveTargetMap = (events: CombatEvent[]): Record<string, string> => {
+  const targetByActor: Record<string, string> = {}
+  for (const event of events) {
+    if (event.eventType === 'attack') {
+      targetByActor[event.attackerId] = event.defenderId
+      continue
+    }
+    if (event.eventType === 'action' && event.targetId) {
+      targetByActor[event.actorId] = event.targetId
+    }
+  }
+  return targetByActor
+}
+
 const normalizeLookup = (value: string): string =>
   value
     .normalize('NFD')
@@ -135,8 +167,8 @@ const armorPresetNames = MAGUS_EQUIPMENT_DATA.armors
   .map((armor) => armor.name)
   .sort((a, b) => a.localeCompare(b, 'hu'))
 
-const toAttackMode = (weapon: WeaponRecord): AttackMode =>
-  weapon.kind === 'kozelharci' ? 'melee' : 'ranged'
+const deriveAttackMode = (rangeFeet: number | undefined): 'melee' | 'ranged' =>
+  (rangeFeet ?? 0) > 0 ? 'ranged' : 'melee'
 
 const formatRules = (rules: AppliedRule[]): string =>
   rules.map((r) => `${r.ref.code} (${r.ref.source} ${r.ref.section}): ${r.explanation}`).join('\n')
@@ -291,11 +323,13 @@ const PartyTable = ({
   party,
   allCombatants,
   distances,
+  effectiveTargets,
 }: {
   title: string
   party: CombatantSnapshot[]
   allCombatants: CombatantSnapshot[]
   distances?: DistanceMap
+  effectiveTargets?: Record<string, string>
 }) => (
   <div className="panel">
     <h3>{title}</h3>
@@ -318,10 +352,11 @@ const PartyTable = ({
         </thead>
         <tbody>
           {party.map((c) => {
-            const target = c.targetId
-              ? allCombatants.find((candidate) => candidate.id === c.targetId)
+            const shownTargetId = effectiveTargets?.[c.id] ?? c.targetId
+            const target = shownTargetId
+              ? allCombatants.find((candidate) => candidate.id === shownTargetId)
               : undefined
-            const distanceFeet = c.targetId ? getPairDistance(distances, c.id, c.targetId) : null
+            const distanceFeet = shownTargetId ? getPairDistance(distances, c.id, shownTargetId) : null
             const distanceRelevant =
               distanceFeet !== null &&
               (distanceFeet > 0 || isRangedCombatant(c) || (target ? isRangedCombatant(target) : false))
@@ -359,9 +394,9 @@ const PartyTable = ({
               <td>{c.ve}</td>
               <td>{c.ce}</td>
               <td>
-                {c.targetId ? (
+                {shownTargetId ? (
                   <div className="target-cell">
-                    <div className="target-name">{target?.name ?? c.targetId}</div>
+                    <div className="target-name">{target?.name ?? shownTargetId}</div>
                     {distanceRelevant && (
                       <span className={`distance-badge ${distanceClass}`}>{distanceFeet} láb</span>
                     )}
@@ -383,6 +418,14 @@ const splitByParty = (stateAfter: CombatantSnapshot[]): { a: CombatantSnapshot[]
   b: stateAfter.filter((s) => s.party === 'b'),
 })
 type TeamSide = Party
+
+const createEmptyDeclaredRule = (): DeclaredCombatRule => ({
+  id: `decl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  sourceId: '',
+  ruleId: 'meglepetesszeru_tamadas',
+})
+
+const getOpposingParty = (party: Party): Party => (party === 'a' ? 'b' : 'a')
 
 const createEmptyCombatant = (partyPrefix: Party, idx: number): Combatant => ({
   id: `${partyPrefix}-${Date.now()}-${idx}`,
@@ -493,15 +536,6 @@ const FighterEditor = ({
             <input
               value={c.id}
               onChange={(e) => onUpdate(team, idx, (p) => ({ ...p, id: e.target.value }))}
-            />
-          </label>
-          <label>
-            Célpont ID
-            <input
-              value={c.targetId ?? ''}
-              onChange={(e) =>
-                onUpdate(team, idx, (p) => ({ ...p, targetId: e.target.value || undefined }))
-              }
             />
           </label>
           <label>
@@ -632,8 +666,9 @@ const FighterEditor = ({
                           ...p.weapon,
                           name: preset.name,
                           category: preset.category ?? p.weapon.category,
-                          attackMode: toAttackMode(preset),
+                          time: typeof preset.time === 'number' ? preset.time : p.weapon.time,
                           rangeFeet: preset.rangeFeet ?? p.weapon.rangeFeet ?? 0,
+                          attackMode: deriveAttackMode(preset.rangeFeet ?? p.weapon.rangeFeet ?? 0),
                           damage: preset.damage,
                           ke: preset.ke ?? p.weapon.ke,
                           te: preset.te ?? p.weapon.te,
@@ -681,22 +716,7 @@ const FighterEditor = ({
             </select>
           </label>
           <label className="mini-field">
-            Típus
-            <select
-              value={c.weapon.attackMode ?? (c.weapon.ce > 0 ? 'ranged' : 'melee')}
-              onChange={(e) =>
-                onUpdate(team, idx, (p) => ({
-                  ...p,
-                  weapon: { ...p.weapon, attackMode: e.target.value as AttackMode },
-                }))
-              }
-            >
-              <option value="melee">Közelharci</option>
-              <option value="ranged">Távolsági</option>
-            </select>
-          </label>
-          <label className="mini-field">
-            Hatótáv (láb)
+            Hatótáv
             <input
               type="number"
               min={0}
@@ -704,7 +724,11 @@ const FighterEditor = ({
               onChange={(e) =>
                 onUpdate(team, idx, (p) => ({
                   ...p,
-                  weapon: { ...p.weapon, rangeFeet: Number(e.target.value) },
+                  weapon: {
+                    ...p.weapon,
+                    rangeFeet: Number(e.target.value),
+                    attackMode: deriveAttackMode(Number(e.target.value)),
+                  },
                 }))
               }
             />
@@ -866,12 +890,133 @@ const TeamEditor = ({ team, title, members, onUpdate, onRemove, onAdd }: TeamEdi
   </section>
 )
 
+type TargetMappingEditorProps = {
+  rows: Array<{ id: string; name: string; party: Party; targetId?: string }>
+  onChangeTarget: (combatantId: string, targetId?: string) => void
+  title?: string
+  description?: string
+  asSection?: boolean
+}
+
+const TargetMappingEditor = ({
+  rows,
+  onChangeTarget,
+  title = 'Célpont-hozzárendelés',
+  description = 'Itt adhatod meg egyszerűen, hogy ki kit támadjon. A harcoskártyákban már nincs külön célpont mező.',
+  asSection = true,
+}: TargetMappingEditorProps) => {
+  const content = (
+    <>
+      <h3>{title}</h3>
+      <p className="muted">{description}</p>
+      <div className="target-map-grid">
+        {rows.map((row) => {
+          const enemyParty = getOpposingParty(row.party)
+          const enemyCandidates = rows.filter((candidate) => candidate.party === enemyParty)
+          return (
+            <label key={row.id}>
+              {row.name} ({row.party.toUpperCase()})
+              <select
+                value={row.targetId ?? ''}
+                onChange={(e) => onChangeTarget(row.id, e.target.value || undefined)}
+              >
+                <option value="">— automatikus célválasztás —</option>
+                {enemyCandidates.map((enemy) => (
+                  <option key={enemy.id} value={enemy.id}>
+                    {enemy.name} ({enemy.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )
+        })}
+      </div>
+    </>
+  )
+
+  if (!asSection) return <div className="target-mapping-editor">{content}</div>
+  return <section className="panel target-mapping-editor">{content}</section>
+}
+
+type RuleDeclarationEditorProps = {
+  declarations: DeclaredCombatRule[]
+  combatants: Array<{ id: string; name: string; party: Party }>
+  onChange: (declarationId: string, patch: Partial<DeclaredCombatRule>) => void
+  onAdd: () => void
+  onRemove: (declarationId: string) => void
+}
+
+const RuleDeclarationEditor = ({
+  declarations,
+  combatants,
+  onChange,
+  onAdd,
+  onRemove,
+}: RuleDeclarationEditorProps) => {
+  const combatantById = new Map(combatants.map((c) => [c.id, c]))
+  return (
+    <section className="panel">
+      <h3>Speciális harci helyzetek</h3>
+      <p className="muted">
+        A jelenlegi csapatállapot alapján itt adhatod meg, hogy melyik harcosra legyen érvényes speciális
+        helyzet a következő körben (pl. roham, meglepetés).
+      </p>
+      <div className="decl-rules">
+        {declarations.map((decl) => {
+          const source = combatantById.get(decl.sourceId)
+          return (
+            <div className="decl-rule-row" key={decl.id}>
+              <label>
+                Forrás (X)
+                <select
+                  value={decl.sourceId}
+                  onChange={(e) => onChange(decl.id, { sourceId: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {combatants.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.party.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Szabály
+                <select
+                  value={decl.ruleId}
+                  onChange={(e) => onChange(decl.id, { ruleId: e.target.value as DeclaredCombatRuleId })}
+                >
+                  {DECLARED_COMBAT_RULE_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="decl-rule-actions">
+                <button type="button" onClick={() => onRemove(decl.id)}>
+                  Törlés
+                </button>
+                {source && <span className="muted">{source.name}</span>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <button type="button" onClick={onAdd}>
+        + Szabály hozzáadása
+      </button>
+    </section>
+  )
+}
+
 export default function App() {
   const initialScenario = getInitialScenario()
   const [activeInputTab, setActiveInputTab] = useState<'builder' | 'json'>('builder')
   const [scenarioText, setScenarioText] = useState(DEFAULT_SCENARIO)
   const [teamA, setTeamA] = useState<Combatant[]>(initialScenario.partyA)
   const [teamB, setTeamB] = useState<Combatant[]>(initialScenario.partyB)
+  const [declaredRules, setDeclaredRules] = useState<DeclaredCombatRule[]>([])
   const [targeting, setTargeting] = useState(
     initialScenario.settings?.targeting ?? 'random',
   )
@@ -891,6 +1036,10 @@ export default function App() {
   const [diceQueueInput, setDiceQueueInput] = useState('')
   const [interactiveMode, setInteractiveMode] = useState(false)
   const [roundCursor, setRoundCursor] = useState(1)
+  const [shownTargetMappingsByRound, setShownTargetMappingsByRound] = useState<Record<number, boolean>>({})
+  const [roundTargetOverridesByRound, setRoundTargetOverridesByRound] = useState<
+    Record<number, Record<string, string | undefined>>
+  >({})
   const [error, setError] = useState<string | null>(null)
   const [runState, setRunState] = useState<RunState | null>(null)
 
@@ -905,13 +1054,41 @@ export default function App() {
     [diceQueueInput],
   )
 
+  const declarationCombatants = useMemo(
+    () => [
+      ...teamA.map((c) => ({ id: c.id, name: c.name, party: 'a' as const })),
+      ...teamB.map((c) => ({ id: c.id, name: c.name, party: 'b' as const })),
+    ],
+    [teamA, teamB],
+  )
+
+  const mappingRows = useMemo(
+    () => [
+      ...teamA.map((c) => ({ id: c.id, name: c.name, party: 'a' as const, targetId: c.targetId })),
+      ...teamB.map((c) => ({ id: c.id, name: c.name, party: 'b' as const, targetId: c.targetId })),
+    ],
+    [teamA, teamB],
+  )
+
   const updateCombatant = (
     team: TeamSide,
     index: number,
     updater: (prev: Combatant) => Combatant,
   ) => {
     const setter = team === 'a' ? setTeamA : setTeamB
-    setter((prev) => prev.map((c, i) => (i === index ? updater(c) : c)))
+    setter((prev) =>
+      prev.map((c, i) => {
+        if (i !== index) return c
+        const updated = updater(c)
+        return {
+          ...updated,
+          weapon: {
+            ...updated.weapon,
+            attackMode: deriveAttackMode(updated.weapon.rangeFeet),
+          },
+        }
+      }),
+    )
   }
 
   const removeCombatant = (team: TeamSide, index: number) => {
@@ -922,6 +1099,23 @@ export default function App() {
   const addCombatant = (team: TeamSide) => {
     const setter = team === 'a' ? setTeamA : setTeamB
     setter((prev) => [...prev, createEmptyCombatant(team, prev.length)])
+  }
+
+  const setCombatantTarget = (combatantId: string, targetId?: string) => {
+    setTeamA((prev) => prev.map((c) => (c.id === combatantId ? { ...c, targetId } : c)))
+    setTeamB((prev) => prev.map((c) => (c.id === combatantId ? { ...c, targetId } : c)))
+  }
+
+  const updateDeclaredRule = (declarationId: string, patch: Partial<DeclaredCombatRule>) => {
+    setDeclaredRules((prev) => prev.map((rule) => (rule.id === declarationId ? { ...rule, ...patch } : rule)))
+  }
+
+  const removeDeclaredRule = (declarationId: string) => {
+    setDeclaredRules((prev) => prev.filter((rule) => rule.id !== declarationId))
+  }
+
+  const addDeclaredRule = () => {
+    setDeclaredRules((prev) => [...prev, createEmptyDeclaredRule()])
   }
 
   const buildScenarioFromBuilder = (): Scenario => ({
@@ -937,6 +1131,62 @@ export default function App() {
     },
   })
 
+  const promptForTargetReassignments = (
+    encounter: ReturnType<typeof createEncounter>,
+    stateBeforeRound: ReturnType<ReturnType<typeof createEncounter>['getState']>,
+    encounterState: ReturnType<ReturnType<typeof createEncounter>['getState']>,
+  ) => {
+    const all = [...encounterState.partyA, ...encounterState.partyB]
+    const beforeAll = [...stateBeforeRound.partyA, ...stateBeforeRound.partyB]
+    const byId = new Map(all.map((c) => [c.id, c]))
+    const beforeById = new Map(beforeAll.map((c) => [c.id, c]))
+
+    for (const combatant of all) {
+      if (combatant.status !== 'active' || !combatant.targetId) continue
+      const previousCombatant = beforeById.get(combatant.id)
+      const previousTargetId = previousCombatant?.targetId
+      if (!previousTargetId || previousTargetId !== combatant.targetId) continue
+
+      const previousTarget = beforeById.get(previousTargetId)
+      if (!previousTarget || previousTarget.status !== 'active') continue
+
+      const currentTarget = byId.get(combatant.targetId)
+      if (currentTarget && currentTarget.status === 'active') continue
+
+      const enemyParty = getOpposingParty(combatant.party)
+      const enemyCandidates = all.filter((c) => c.party === enemyParty && c.status === 'active')
+
+      if (enemyCandidates.length === 0) {
+        setCombatantTarget(combatant.id, undefined)
+        continue
+      }
+
+      const optionsText = enemyCandidates
+        .map((candidate, index) => `${index + 1}: ${candidate.name} (${candidate.id})`)
+        .join('\n')
+      const answer = window.prompt(
+        `${combatant.name} (${combatant.id}) célpontja kiesett (${currentTarget?.status ?? 'nincs'}).\n` +
+          `Válassz új célpontot:\n${optionsText}\n\n` +
+          `Adj meg sorszámot 1-${enemyCandidates.length}, vagy hagyd üresen az automatikus célválasztáshoz.`,
+        '',
+      )
+
+      const selected = Number(answer)
+      const nextTargetId =
+        Number.isFinite(selected) && selected >= 1 && selected <= enemyCandidates.length
+          ? enemyCandidates[selected - 1].id
+          : undefined
+
+      setCombatantTarget(combatant.id, nextTargetId)
+      encounter.modifyCombatant(combatant.id, { targetId: nextTargetId })
+      encounterState = {
+        ...encounterState,
+        partyA: encounterState.partyA.map((c) => (c.id === combatant.id ? { ...c, targetId: nextTargetId } : c)),
+        partyB: encounterState.partyB.map((c) => (c.id === combatant.id ? { ...c, targetId: nextTargetId } : c)),
+      }
+    }
+  }
+
   const runBattle = () => {
     try {
       setError(null)
@@ -946,6 +1196,11 @@ export default function App() {
           : (buildScenarioFromBuilder() as unknown)
       const parsed = parseScenario(raw)
       const roundLimit = Math.min(maxRounds, parsed.maxRounds)
+      const validIds = new Set([...parsed.partyA, ...parsed.partyB].map((combatant) => combatant.id))
+      const validDeclaredRules = declaredRules.filter(
+        (rule) => validIds.has(rule.sourceId),
+      )
+      const ruleHooks = createDeclaredCombatRuleHooks(validDeclaredRules)
 
       let rollerIdx = 0
       const roller = (sides: number): number => {
@@ -956,9 +1211,20 @@ export default function App() {
       const encounter = createEncounter(parsed.partyA, parsed.partyB, {
         ...parsed.options,
         roller,
+        ruleHooks,
       })
       const initial = encounter.getState()
-      const result = encounter.run(roundLimit)
+      const rounds: RoundResult[] = []
+      while (!encounter.isOver() && rounds.length < roundLimit) {
+        const stateBeforeRound = encounter.getState()
+        const next = encounter.nextRound()
+        rounds.push(next)
+        const stateAfterRound = encounter.getState()
+        if (!interactiveMode) {
+          promptForTargetReassignments(encounter, stateBeforeRound, stateAfterRound)
+        }
+      }
+      const result: EncounterResult = { rounds, winner: encounter.getState().winner }
       setRunState({
         initialA: initial.partyA,
         initialB: initial.partyB,
@@ -966,6 +1232,8 @@ export default function App() {
         roundDistances: buildRoundDistances(initial.distances, result.rounds),
         result,
       })
+      setShownTargetMappingsByRound({})
+      setRoundTargetOverridesByRound({})
       setRoundCursor(1)
     } catch (e) {
       setRunState(null)
@@ -1068,6 +1336,14 @@ export default function App() {
                 onAdd={addCombatant}
               />
             </div>
+            <TargetMappingEditor rows={mappingRows} onChangeTarget={setCombatantTarget} />
+            <RuleDeclarationEditor
+              declarations={declaredRules}
+              combatants={declarationCombatants}
+              onChange={updateDeclaredRule}
+              onAdd={addDeclaredRule}
+              onRemove={removeDeclaredRule}
+            />
           </div>
         ) : (
           <label>
@@ -1144,6 +1420,10 @@ export default function App() {
             : runState.result.rounds
           ).map((round: RoundResult) => (
             <section className="panel" key={round.round}>
+              {(() => {
+                const effectiveTargets = getRoundEffectiveTargetMap(round.events)
+                return (
+                  <>
               <h2>{round.round}. kör</h2>
               <InitiativeList entries={round.initiatives} />
               {roundDistancePairs(round.stateAfter, runState.roundDistances[round.round]).length > 0 && (
@@ -1185,20 +1465,69 @@ export default function App() {
                   </div>
                 ))}
 
+              <button
+                type="button"
+                className="toggle-target-map-btn"
+                onClick={() =>
+                  setShownTargetMappingsByRound((prev) => ({
+                    ...prev,
+                    [round.round]: !prev[round.round],
+                  }))
+                }
+              >
+                {shownTargetMappingsByRound[round.round]
+                  ? 'Célpont-hozzárendelés elrejtése'
+                  : 'Célpont-hozzárendelés megjelenítése'}
+              </button>
+              {shownTargetMappingsByRound[round.round] && (
+                <div className="round-target-map">
+                  {roundTargetAssignments(round.stateAfter).length === 0 ? (
+                    <p className="muted">Ebben a körben nincs rögzített célpont-hozzárendelés.</p>
+                  ) : (
+                    <TargetMappingEditor
+                      asSection={false}
+                      title="Célpont-hozzárendelés (következő kör)"
+                      description="Itt átállíthatod a célpontokat a következő futtatáshoz/körhöz."
+                      rows={round.stateAfter.map((c) => ({
+                        id: c.id,
+                        name: c.name,
+                        party: c.party,
+                        targetId: roundTargetOverridesByRound[round.round]?.[c.id] ?? c.targetId,
+                      }))}
+                      onChangeTarget={(combatantId, targetId) => {
+                        setRoundTargetOverridesByRound((prev) => ({
+                          ...prev,
+                          [round.round]: {
+                            ...(prev[round.round] ?? {}),
+                            [combatantId]: targetId,
+                          },
+                        }))
+                        setCombatantTarget(combatantId, targetId)
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
               <div className="grid">
                 <PartyTable
                   title="A csapat kör végi állapot"
                   party={splitByParty(round.stateAfter).a}
                   allCombatants={round.stateAfter}
                   distances={runState.roundDistances[round.round]}
+                  effectiveTargets={effectiveTargets}
                 />
                 <PartyTable
                   title="B csapat kör végi állapot"
                   party={splitByParty(round.stateAfter).b}
                   allCombatants={round.stateAfter}
                   distances={runState.roundDistances[round.round]}
+                  effectiveTargets={effectiveTargets}
                 />
               </div>
+                  </>
+                )
+              })()}
             </section>
           ))}
 

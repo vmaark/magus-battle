@@ -191,7 +191,6 @@ textarea {
 
 .fighter-grid.stats-inline > label {
   width: auto;
-  min-width: 72px;
   margin-bottom: 0;
 }
 
@@ -323,6 +322,71 @@ textarea {
 .controls input[type='checkbox'] {
   width: auto;
   margin-right: 8px;
+}
+
+.decl-rules {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.decl-rule-row {
+  display: grid;
+  gap: 8px 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.2fr) auto;
+  align-items: end;
+  border: 1px dashed #3a5326;
+  border-radius: 4px;
+  padding: 8px;
+  background: rgba(18, 26, 12, 0.6);
+}
+
+.decl-rule-row label {
+  margin-bottom: 0;
+}
+
+.decl-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.decl-rule-actions button {
+  height: 34px;
+  min-width: 84px;
+}
+
+.target-map-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.target-map-grid label {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .decl-rule-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.toggle-target-map-btn {
+  margin: 12px 0 8px;
+}
+
+.round-target-map {
+  border: 1px dashed #3a5326;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  background: rgba(18, 26, 12, 0.6);
+}
+
+.round-target-map ul {
+  margin: 0;
+  padding-left: 20px;
 }
 
 button {

@@ -29,6 +29,8 @@ export const ROUND_SEGMENTS = 10
 export type Weapon = {
   name: string
   category: WeaponCategory
+  /** Fegyver Időigénye szegmensben; ha nincs megadva, a méretkategória szerinti alapérték lép életbe. */
+  time?: number
   /** Támadási mód: közelharci vagy távolsági (CÉ-alapú) */
   attackMode?: AttackMode
   /** Maximális hatótáv ynevi lábban (távolsági fegyvernél értelmezett) */
